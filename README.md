@@ -37,7 +37,16 @@ conda activate DiffPhyCon
 
 # Dataset and checkpoints
 ## Dataset
-The checkpoints of both our DiffPhyCon and baselines on the three tasks (1D Burgers', 2D jellyfish, 2D smoke), and our released Jellyfish datasets can be downloaded in [link](https://drive.google.com/drive/folders/1_ECmMZ77Lm02znhQ72MvwKe1MqGQquzU). To run the following training and inference scripts locally, replace the path names in filepath.py by your local paths.
+The checkpoints of both our DiffPhyCon and baselines on the three tasks (1D Burgers', 2D jellyfish, 2D smoke), and our released Jellyfish datasets can be downloaded in [link](https://drive.google.com/drive/folders/1_ECmMZ77Lm02znhQ72MvwKe1MqGQquzU). 
+
+## Dataset Generation
+To generate dataset for the three tasks by yourself, please run the following files:
+- 1D Burger's: dataset/apps/generate_burgers.py 
+- 2D jellyfish: dataset/apps/generate_jellyfish/LilyPad/LilyPad.pde. Please replace the variable *root_dir* in this file with your local path. To run this file, you need to download and install [Processing](https://processing.org/). For more details on how to run lily-pad files, please refer to its [official repo](https://github.com/weymouth/lily-pad).
+- 2D Smoke: dataset/apps/a_gen_dataset_128.py. For its running environment, please refer to the **Environment** section in the README.md file of our another paper: [WDNO](https://github.com/AI4Science-WestlakeU/wdno). 
+
+
+To run the following training and inference scripts locally, replace the path names in filepath.py by your local paths.
 <!-- Because the training dataset in the 2D experiment is over 100GB, it is not contained in this link. -->
 
 
