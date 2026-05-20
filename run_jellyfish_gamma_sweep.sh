@@ -20,10 +20,13 @@ for G in "${GAMMAS[@]}"; do
     echo "============================================================"
     echo ">>> Running w_prob_exp=${G}"
     echo "============================================================"
-    OUTPUT=$(python -u inference/inference_2d_jellyfish.py \
+    LOG_TMP=$(mktemp)
+    python -u inference/inference_2d_jellyfish.py \
         --num_batches 1 --batch_size 4 \
         --w_prob_exp ${G} \
-        --sampling_timesteps 8 2>&1 | tee /dev/tty | tail -50)
+        --sampling_timesteps 1000 2>&1 | tee "$LOG_TMP"
+    OUTPUT=$(cat "$LOG_TMP")
+    rm -f "$LOG_TMP"
     # extract result dir from "id N saved at /path/..." lines
     RDIR=$(echo "$OUTPUT" | grep "id 0 saved at" | head -1 | sed 's/.*saved at \(.*\):.*/\1/')
     echo "gamma=${G} -> ${RDIR}" | tee -a "$RESULTS_LOG"

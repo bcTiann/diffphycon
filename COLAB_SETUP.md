@@ -34,7 +34,7 @@ REPO_URL = "https://github.com/你的用户名/diffphycon-mac.git"
 os.chdir('/content/diffphycon')
 
 # 安装缺失的依赖
-!pip install --quiet accelerate einops einops_exts rotary_embedding_torch tensorboardX h5py torchvision tensorboard
+!pip install --quiet accelerate einops einops_exts rotary_embedding_torch tensorboardX h5py torchvision tensorboard ema_pytorch
 
 print("Repo 和依赖装好了")
 ```

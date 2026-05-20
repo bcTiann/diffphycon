@@ -28,8 +28,10 @@ print(f"[device] {DEVICE}")
 # Config
 # ============================================================
 RESULT_DIR = sys.argv[1] if len(sys.argv) > 1 else \
-    "/Users/baochen/diffphycon/data/jellyfish/results/inference_full/2026-05-20_19-02-29_coeff_ratio_w_0.3_J0.3_"
-FORCE_CKPT = "/Users/baochen/diffphycon/data/jellyfish/checkpoints/force_surrogate_model/force_model_epoch_9.pth"
+    "data/jellyfish/results/inference_full/latest"  # not used unless argv[1] missing
+# resolve force model relative to project root
+_HERE = os.path.dirname(os.path.abspath(__file__))
+FORCE_CKPT = os.path.join(_HERE, "data/jellyfish/checkpoints/force_surrogate_model/force_model_epoch_9.pth")
 IMAGE_SIZE = 64
 LAMDA = 100   # paper default
 # ============================================================
