@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from dataset.data_1d import Burgers1D
 from diffusion.diffusion_1d_burgers import GaussianDiffusion, Trainer
 from model.burgers_1d.unet import Unet2D
+from utils import DEVICE
 
 none_or_str = lambda x: None if x == 'None' else x
 
@@ -26,6 +27,8 @@ parser.add_argument('--train_num_steps', default=100000, type=int,
                     help='train_num_steps')
 parser.add_argument('--checkpoint_interval', default=10000, type=int,
                     help='save checkpoint every checkpoint_interval steps')
+parser.add_argument('--batch_size', default=16, type=int,
+                    help='train batch size (default 16, paper default)')
 
 
 
@@ -76,6 +79,8 @@ parser.add_argument('--is_model_w', default=False, type=eval, help='If training 
 parser.add_argument('--eval_two_models', default=False, type=eval, help='Set to False in this training file')
 parser.add_argument('--expand_condition', default=False, type=eval, help='Expand conditioning information of u0 or uT in separate channels')
 parser.add_argument('--prior_beta', default=1, type=eval, help='strength of the prior (1 is p(u,w); 0 is p(u|w))')
+parser.add_argument('--resume_from', default=None, type=str,
+                    help='Resume training. Pass "auto" to load the latest checkpoint in results_folder, or an int milestone number. Default None = train from scratch.')
 
 
 # In[ ]:
@@ -93,7 +98,7 @@ def get_dataset(dataset='free_u_f_1e5', partially_observed=None, nt_total=11):
         pre_transform=None,
         verbose=False,
         root_path=f'data/{dataset}' , # dataset of f varying in both space and time
-        device='cuda',
+        device=DEVICE,
         rescaler=10., 
         stack_u_and_f=True, 
         pad_for_2d_conv=True, 
@@ -181,28 +186,48 @@ def run_2d_Unet(dataset, args):
     else:
         results_folder = './trained_models/burgers/' + exp_dirname
     trainer = Trainer(
-        ddpm, 
-        dataset, 
-        results_folder=results_folder, 
-        train_num_steps=args.train_num_steps, 
-        save_and_sample_every=args.checkpoint_interval, 
+        ddpm,
+        dataset,
+        results_folder=results_folder,
+        train_num_steps=args.train_num_steps,
+        save_and_sample_every=args.checkpoint_interval,
+        train_batch_size=args.batch_size,
     )
-    # trainer.load(1) # load pervious file
+
+    # resume logic
+    if args.resume_from is not None:
+        if args.resume_from == 'auto':
+            # find the largest milestone number in results_folder
+            import re, glob
+            ckpts = glob.glob(f'{results_folder}/cos10000-model-*.pt')
+            if not ckpts:
+                print(f'[resume] no checkpoint found in {results_folder}, training from scratch')
+            else:
+                milestones = sorted(int(re.search(r'model-(\d+)\.pt', c).group(1)) for c in ckpts)
+                latest = milestones[-1]
+                print(f'[resume] auto-detected milestone {latest} ({len(ckpts)} checkpoints found)')
+                trainer.load(latest)
+        else:
+            milestone = int(args.resume_from)
+            print(f'[resume] loading milestone {milestone}')
+            trainer.load(milestone)
+
     trainer.train()
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
     
-    if args.dataset in ["free_u_f_1e5", 'free_u_f_1e5_front_rear_quarter']:
-        dataset = get_dataset(args.dataset, args.partially_observed)
+    # any free_u_f_* dataset works (get_dataset just uses the name as a folder path)
+    dataset = get_dataset(args.dataset, args.partially_observed)
     
     print(f'data shape: {dataset.get(0).shape}')
     print(f'Rescaling data by dividing {dataset.rescaler}')
 
     # set random seed
     torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(0)
     np.random.seed(0)
 
     run_2d_Unet(dataset, args)

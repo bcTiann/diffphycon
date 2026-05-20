@@ -597,7 +597,8 @@ class GaussianDiffusion(nn.Module):
         else:
             raise ValueError(f'unknown beta schedule {beta_schedule}')
 
-        betas = beta_schedule_fn(timesteps, **schedule_fn_kwargs).to(device)
+        # MPS doesn't support float64, so cast to float32 before moving
+        betas = beta_schedule_fn(timesteps, **schedule_fn_kwargs).float().to(device)
         alphas = 1. - betas
         alphas_cumprod = torch.cumprod(alphas, dim=0)
         alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value = 1.)

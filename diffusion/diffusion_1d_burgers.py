@@ -429,6 +429,14 @@ class GaussianDiffusion(nn.Module):
             
             # guidance
             if self.guidance_u0:
+                # === DIAGNOSTIC: print guidance magnitudes at key timesteps ===
+                _t_int = t[0].item()
+                if _t_int in {999, 800, 500, 200, 50, 10, 0}:
+                    _grad = nablaJ(x_start)
+                    _sched = nablaJ_scheduler(_t_int)
+                    _eff = _grad * _sched
+                    print(f"[guide] t={_t_int:4d} | sched={_sched:.5f}  ||nablaJ||={_grad.norm().item():.4f}  ||eff||={_eff.norm().item():.4f}  ||pred_noise||={pred_noise.norm().item():.4f}")
+                # === END DIAGNOSTIC ===
                 pred_noise = may_proj_guidance(pred_noise, nablaJ(x_start) * nablaJ_scheduler(t[0].item()))
                 x_start = self.predict_start_from_noise(x, t, pred_noise)
                 x_start = maybe_clip(x_start)
@@ -533,6 +541,16 @@ class GaussianDiffusion(nn.Module):
         # pdb.set_trace()
         for t in tqdm(reversed(range(0, self.num_timesteps)), desc = 'sampling loop time step', total = self.num_timesteps):
             for k in range(self.recurrence_k):
+                # === DIAGNOSTIC: measure pre-replacement distance between model's row 10 and target u_T* ===
+                if k == 0 and t in {999, 800, 500, 200, 50, 10, 0} and 'u_final' in kwargs:
+                    pre_row10 = img[:, 0, self.condition_idx, :]   # model's current row 10 (BEFORE replacement)
+                    u_final = kwargs['u_final']                    # the target u_T*  (normalized)
+                    rms  = (pre_row10 - u_final).pow(2).mean().sqrt().item()
+                    mx   = (pre_row10 - u_final).abs().max().item()
+                    base = u_final.abs().mean().item()
+                    print(f"[diag] t={t:4d} | RMS(row10 - u_T*)={rms:.4f}  max={mx:.4f}  (target |u_T*| avg={base:.4f})")
+                # === END DIAGNOSTIC ===
+
                 # fill u0 into cur sample
                 if self.is_condition_u0: # NOTE: u0 here means physical time t=0, while the u0 in guidance means the 0th step in diffusion
                     u0 = kwargs['u_init'] # should be (batch, Nx)
@@ -891,7 +909,7 @@ class Trainer(object):
 
         # dataset and dataloader
 
-        dl = DataLoader(dataset, batch_size = train_batch_size, shuffle = True, pin_memory = True, num_workers = cpu_count())
+        dl = DataLoader(dataset, batch_size = train_batch_size, shuffle = True, pin_memory = False, num_workers = 0)
         # mmd_dl = DataLoader(dataset, batch_size=num_samples, shuffle=True) 
 
         dl = self.accelerator.prepare(dl)
@@ -973,7 +991,12 @@ class Trainer(object):
 
     def train(self):
         print(self.device)
-        writer = SummaryWriter(logdir='tensorboard_runs/{}'.format(datetime.datetime.now().strftime("%m-%d_%H-%M-%S")))
+        # tag the tensorboard run dir with the experiment id derived from results_folder
+        # e.g. results_folder='./trained_models/burgers_w/FOPC_w_10k/' -> tag='burgers_w-FOPC_w_10k'
+        _rf_parts = [p for p in str(self.results_folder).strip('./').split('/') if p]
+        _exp_tag = '-'.join(_rf_parts[-2:]) if len(_rf_parts) >= 2 else (_rf_parts[-1] if _rf_parts else 'run')
+        _ts = datetime.datetime.now().strftime("%m-%d_%H-%M-%S")
+        writer = SummaryWriter(logdir=f'tensorboard_runs/{_exp_tag}_{_ts}')
         
         accelerator = self.accelerator
         device = accelerator.device
@@ -1027,6 +1050,15 @@ class Trainer(object):
 
                         # torch.save(all_samples, str(self.results_folder / f'sample-{milestone}.png'))
                         self.save(milestone)
+                        # auto-plot the latest training-loss curve (async, doesn't block training)
+                        try:
+                            import subprocess
+                            subprocess.Popen(
+                                ['python', 'plot_loss.py'],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            )
+                        except Exception as _e:
+                            print(f'[plot] failed to spawn plot_loss.py: {_e}')
 
                 pbar.update(1)
 

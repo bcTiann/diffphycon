@@ -18,9 +18,22 @@ from torch.autograd import Variable
 from numbers import Number
 import pickle
 
-from deepsnap.batch import Batch as deepsnap_Batch
+try:
+    from deepsnap.batch import Batch as deepsnap_Batch
+except ImportError:
+    # deepsnap is only needed for non-Burgers experiments; safe to skip on Mac/lite installs
+    deepsnap_Batch = None
 
 from IPython import embed
+
+
+# --- Mac / CUDA compatibility shim ---
+# Auto-detect device: prefer MPS (Apple Silicon) > CPU.
+DEVICE = torch.device(
+    "mps" if torch.backends.mps.is_available()
+    else ("cuda" if torch.cuda.is_available() else "cpu")
+)
+# -----------------------------------
 
 COLOR_LIST = ["b", "r", "g", "y", "c", "m", "skyblue", "indigo", "goldenrod", "salmon", "pink",
                   "silver", "darkgreen", "lightcoral", "navy", "orchid", "steelblue", "saddlebrown", 
@@ -1331,8 +1344,9 @@ def ddpm_guidance_loss(
 
 # Loading dataset and model
 
-def load_burgers_dataset():
-    # NOTE: this dataset is used for instantiate the Trainer class
+def load_burgers_dataset(root_path='data/free_u_f_1e5_front_rear_quarter'):
+    # NOTE: this dataset is used only to instantiate the Trainer class (DataLoader placeholder),
+    # not used for actual sampling — so any valid Burgers dataset path works.
     dataset = Burgers1D(
         dataset="burgers",
         input_steps=1,
@@ -1343,10 +1357,10 @@ def load_burgers_dataset():
         transform=None,
         pre_transform=None,
         verbose=False,
-        root_path = 'data/free_u_f_1e5',
-        device='cuda', 
-        nt_total=11, 
-        rescaler=1, 
+        root_path=root_path,
+        device=DEVICE,
+        nt_total=11,
+        rescaler=1,
     )
     return dataset
 
@@ -1365,9 +1379,9 @@ def get_target(target_i, f=False, device=0, dataset='free_u_f_1e5', **dataset_kw
         pre_transform=None,
         verbose=False,
         root_path = f'data/{dataset}',
-        device='cuda',
-        rescaler=1, 
-        nt_total=11, 
+        device=DEVICE,
+        rescaler=1,
+        nt_total=11,
         **dataset_kwargs
     )
 
@@ -1376,21 +1390,21 @@ def get_target(target_i, f=False, device=0, dataset='free_u_f_1e5', **dataset_kw
     # f_target = test_dataset.get(target_i)[11:, :].cuda()
     if type(target_i) is int:
         if not f: # return only u
-            return test_dataset.get(target_i).cuda(device)[:11, :].unsqueeze(0)
+            return test_dataset.get(target_i).to(DEVICE)[:11, :].unsqueeze(0)
         else:
-            return test_dataset.get(target_i).cuda(device)[11:, :].unsqueeze(0)
+            return test_dataset.get(target_i).to(DEVICE)[11:, :].unsqueeze(0)
     else:
         if not f:
             return torch.stack(
                 tuple(
                     test_dataset.get(i) for i in target_i
-                ), 
+                ),
                 dim=0
-            )[:, :11, :].cuda(device)
+            )[:, :11, :].to(DEVICE)
         else:
             return torch.stack(
                 tuple(
                     test_dataset.get(i) for i in target_i
-                ), 
+                ),
                 dim=0
-            )[:, 11:, :].cuda(device)
+            )[:, 11:, :].to(DEVICE)

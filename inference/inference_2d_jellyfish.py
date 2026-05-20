@@ -805,8 +805,11 @@ class InferencePipeline(object):
         return state_t_list_batch.detach(), theta_t_list_batch.detach() #[batch_size,3,64,64] [batch_size,21]
 
     def run(self, dataloader):
+        max_batches = getattr(self.args_general, 'num_batches', None)
         for i, data in enumerate(dataloader):
-            # pdb.set_trace()
+            if max_batches is not None and i >= max_batches:
+                print(f"[run] reached --num_batches={max_batches}, stopping early")
+                break
             state_0, thetas_0, bd_mask_offset_0, sim_id, _ = data
             state_0, bd_0 = self.pad_data(state_0, bd_mask_offset_0)
             if self.args_general.inference_method == "SAC":
@@ -941,7 +944,14 @@ if __name__ == '__main__':
     # get_ipython().run_line_magic('matplotlib', 'inline')
 
     args = parser.parse_args()
-    args.device = torch.device('cuda', args.gpu)
+    # MPS / CUDA / CPU auto-detect (was: hardcoded cuda)
+    if torch.cuda.is_available():
+        args.device = torch.device('cuda', args.gpu)
+    elif torch.backends.mps.is_available():
+        args.device = torch.device('mps')
+    else:
+        args.device = torch.device('cpu')
+    print(f'[device] using {args.device}')
     if args.only_vis_pressure:
         args.diffusion_joint_model_path = os.path.join(JELLYFISH_DATA_PATH, "checkpoints", "joint_partial")
         args.diffusion_w_model_path = os.path.join(JELLYFISH_DATA_PATH, "checkpoints", "w_partial")

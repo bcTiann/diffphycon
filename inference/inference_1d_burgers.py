@@ -8,7 +8,7 @@ import numpy as np
 from diffusion.diffusion_1d_burgers import Trainer, cosine_beta_J_schedule, get_nablaJ, plain_cosine_schedule, sigmoid_schedule, sigmoid_schedule_flip
 from dataset.apps.generate_burgers import burgers_numeric_solve_free
 from train.train_1d_burgers import get_2d_ddpm
-from utils import mse_deviation, mse_dist_reg, ddpm_guidance_loss, load_burgers_dataset, burgers_metric, get_target
+from utils import mse_deviation, mse_dist_reg, ddpm_guidance_loss, load_burgers_dataset, burgers_metric, get_target, DEVICE
 
 none_or_str = lambda x: None if x == 'None' else x
 RESCALER = 10
@@ -20,6 +20,8 @@ parser.add_argument('--model_str_in_key', default='', type=str,
                     help='description that appears in the result dict key')
 parser.add_argument('--save_file', default='burgers_results/result_zerowf.yaml', type=str,
                     help='file to save')
+parser.add_argument('--save_tag', default='', type=str,
+                    help='tag appended to inference_trajectories filename (e.g. "gamma05")')
 parser.add_argument('--dataset', default='free_u_f_1e5', type=str,
                     help='dataset name for evaluation (eval samples drawn from)')
 parser.add_argument('--model_str', default='', type=str,
@@ -215,7 +217,7 @@ def load_2dconv_model_two_ddpm(i, args):
     args.unet_uw = unet_uw
     args.unet_w = unet_w
     ddpm_two_models = get_2d_ddpm(args)
-    return ddpm_two_models.cuda()
+    return ddpm_two_models.to(DEVICE)
     
     
     
@@ -280,7 +282,8 @@ def diffuse_2dconv(args, custom_metric, model_i, seed=0, ret_ls=False, **kwargs)
 
     # run 5 different seeds
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(0)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(0)
     ddpm = load_2dconv_model(model_i, args)
     
     # sample: actual scaled x and x_gt
@@ -302,7 +305,7 @@ def diffuse_2dconv(args, custom_metric, model_i, seed=0, ret_ls=False, **kwargs)
     J_actual = elems_to_cpu_numpy_if_tuple(J_actual)
     
     energy = energy.cpu().numpy()
-    return ddpm_mse, J_diffused, J_actual, energy
+    return ddpm_mse, J_diffused, J_actual, energy, x, x_gt
 
 
 def get_scheduler(scheduler):
@@ -338,7 +341,7 @@ def evaluate(
         conv2d=True, 
 ):
     n_test_samples = args.n_test_samples
-    batch_size = 50
+    batch_size = args.n_test_samples  # was hardcoded 50; auto-fit so small test sets work
     assert n_test_samples % batch_size  == 0
     rep = n_test_samples // batch_size
 
@@ -350,7 +353,7 @@ def evaluate(
         seed = i
         target_idx = list(range(i * batch_size, (i + 1) * batch_size)) # should also work if being an iterable
         if conv2d:
-            _, _, J_actual, energy = diffuse_2dconv(
+            _, _, J_actual, energy, x, x_gt = diffuse_2dconv(
                 args, 
                 # get_loss_fn_2dconv(wu=wu, wf=wf, target_i=target_idx, dataset=args.dataset, partially_observed=args.partially_observed), 
                 custom_metric=lambda f, **kwargs: burgers_metric(
@@ -397,6 +400,17 @@ def evaluate(
 
         print('J_actual:', l_gts[0][0].mean())
         print('Energy:', energies[0].mean())
+
+        # save trajectories for visualization
+        target = get_target(target_idx, dataset=args.dataset)
+        _tag = f'_{args.save_tag}' if args.save_tag else ''
+        os.makedirs('outputs/trajectories', exist_ok=True)
+        _npz_path = f'outputs/trajectories/inference_trajectories{_tag}.npz'
+        np.savez(_npz_path,
+                 x_pred=x.cpu().numpy(),     # (B, 2, 11, 128) predicted (u, f)
+                 x_gt=x_gt.cpu().numpy(),    # (B, 11, 128)    re-simulated u from f
+                 target=target.cpu().numpy())  # (B, 11, 128)    ground truth (u_0 & u_T*)
+        print(f'saved {_npz_path}')
     
     
 if __name__ == '__main__':
@@ -404,8 +418,17 @@ if __name__ == '__main__':
 
     model_i, model_str, conv_2d = args.exp_id, args.model_str, True
     
+    # take first value of each (CLI uses nargs='+', so they're lists like [1.0])
+    wu_arg    = args.wus[0]
+    wf_arg    = args.wfs[0]
+    wpinn_arg = args.wpinns[0]
+    print(f"[guidance] wu={wu_arg}  wf={wf_arg}  wpinn={wpinn_arg}")
+
     results = evaluate(
         model_i = model_i, # see trained_model/log.yaml for reference
         args = args,
-        conv2d = conv_2d, 
+        conv2d = conv_2d,
+        wu = wu_arg,
+        wf = wf_arg,
+        wpinn = wpinn_arg,
     )

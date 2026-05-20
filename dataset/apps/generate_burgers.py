@@ -18,6 +18,18 @@ import tqdm
 
 from IPython import embed
 
+
+# --- Mac / CPU compatibility shim ---
+# torch.cuda.synchronize() and friends only exist when CUDA is available.
+# On Mac (MPS or CPU), we route them through no-ops so the script still runs.
+_CUDA_OK = torch.cuda.is_available()
+
+def _cuda_sync():
+    if _CUDA_OK:
+        torch.cuda.synchronize()
+# -----------------------------------
+
+
 class burgers():
     def __init__(self,
                  tmin: float=None,
@@ -474,14 +486,14 @@ def generate_data_burgers_equation(
             u0 = torch.FloatTensor(u0).to(device)
             f = torch.FloatTensor(f).to(device)
             pde[key].force = f.reshape(-1, pde[key].grid_size[0] - 1, pde[key].grid_size[1])
-            torch.cuda.synchronize()
+            _cuda_sync()
             t1 = time.time()
             trajectory = burgers_numeric_solve_free(
-                u0, f, visc=0.01, T=pde[key].tmax, dt=1e-4, 
+                u0, f, visc=0.01, T=pde[key].tmax, dt=1e-4,
                 num_t=pde[key].grid_size[0] - 1,
                 mode='const' if not varying_f else None
             ).reshape(-1, *pde[key].grid_size)
-            torch.cuda.synchronize()
+            _cuda_sync()
             t2 = time.time()
             print(f'{key}: {t2 - t1:.4f}s')
             sol[key] = trajectory
@@ -513,14 +525,14 @@ def generate_data_burgers_equation(
             ).reshape(-1, pde[key].grid_size[0] - 1, pde[key].grid_size[1])
 
         # Solving full trajectories and runtime measurement
-        torch.cuda.synchronize()
+        _cuda_sync()
         t1 = time.time()
         trajectory = burgers_numeric_solve(
-            u0, f, visc=0.01, T=pde[key].tmax, dt=1e-4, 
+            u0, f, visc=0.01, T=pde[key].tmax, dt=1e-4,
             num_t=pde[key].grid_size[0] - 1,
             mode='const' if not varying_f else None
         ).reshape(-1, *pde[key].grid_size)
-        torch.cuda.synchronize()
+        _cuda_sync()
         t2 = time.time()
         print(f'{key}: {t2 - t1:.4f}s')
         sol[key] = trajectory
@@ -643,9 +655,11 @@ def burgers_equation(
 
 def main(args):
     #gpu
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.device)[-1]
+    if _CUDA_OK and str(args.device).startswith('cuda'):
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.device)[-1]
     use_cuda = torch.cuda.is_available()
-    print("Is available to use cuda? : ",use_cuda)
+    print("Is available to use cuda? : ", use_cuda)
+    print(f"Using device: {args.device}")
 
     check_directory()
 
@@ -714,7 +728,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     # use same seed
     torch.manual_seed(0)
-    torch.cuda.manual_seed(0)
+    if _CUDA_OK:
+        torch.cuda.manual_seed(0)
     np.random.seed(0)
     random.seed(0) # ....damn it
 

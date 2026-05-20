@@ -160,3 +160,37 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# ===========================================================
+# Project-specific: NEVER push to GitHub (too large)
+# ===========================================================
+
+# Model checkpoints (each ~500 MB to 1.6 GB)
+trained_models/
+*.pt
+*.pth
+*.ckpt
+
+# Datasets (h5, npz, pkl)
+data/
+*.h5
+*.npz
+*.pkl
+
+# Inference outputs
+outputs/
+burgers_results/
+
+# Training logs (tensorboard)
+tensorboard_runs/
+runs/
+events.out.*
+
+# Mac
+.DS_Store
+
+# VS Code
+.vscode/
+
+# If you really want to commit a small specific file inside an ignored dir,
+# use `git add -f path/to/file` to force-add it.
