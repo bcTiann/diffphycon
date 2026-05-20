@@ -8,7 +8,9 @@ set -e
 ulimit -n 4096
 
 export PYTHONUNBUFFERED=1
-export PYTHONPATH=/Users/baochen/diffphycon
+# auto-detect project root (works on Mac, Colab, anywhere)
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export PYTHONPATH="${SCRIPT_DIR}"
 
 GAMMAS=(1.0 0.7 0.5 0.3)
 
