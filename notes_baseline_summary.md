@@ -17,6 +17,27 @@
 
 → **整体 ~ 1/30 论文规模**,适合"概念验证"型对比,不适合冲绝对数字。
 
+### 1.1 论文发表的 benchmark(PDF Table 1,2026-05-27 核实)
+
+论文 **Table 1** "Best J_actual in 1D Burgers' equation control"。metric:`J_actual = ∫_Ω |u(T,x) − u_d(x)|² dx`(对空间积分,≈ 我们 `.mean(-1)`,可直接比)。setting 命名:**FO-PC = 我们的 FOPC**,**PO-PC = 我们的 POPC**,PO-FC = partial-obs full-control(我们没做)。
+
+| Method | PO-FC | **FO-PC** | **PO-PC** |
+|--------|------:|------:|------:|
+| SL | 0.09752 | 0.00078 | 0.02328 |
+| BC | 0.02836 | 0.00856 | 0.00952 |
+| BPPO | 0.02771 | 0.00852 | 0.00891 |
+| **DiffPhyCon (paper)** | **0.01103** | **0.00037** | **0.00494** |
+
+**三方对比(FOPC,metric 对齐):**
+
+| | J | 相对论文 |
+|---|---:|---:|
+| 论文 DiffPhyCon (full-scale) | **0.00037** | 1× |
+| 我们 DDPM baseline (1/30) | 0.0082 | ~22× 差 |
+| 我们 FM (1/30) | 0.0071 | ~19× 差 |
+
+→ 我们比论文 SOTA **差 ~20×,纯规模差距**(数据 1/10、步数 1/30、dim 1/2)。**唯一公平对比是 FM vs 我们自己同规模 DDPM**(见 §3.1):那里 FM ≈ DDPM(J 略好、energy 省一半)。要追平论文 0.00037 须 paper-grade 规模(GPU/Modal)。
+
 ---
 
 ## 2. 已训模型清单

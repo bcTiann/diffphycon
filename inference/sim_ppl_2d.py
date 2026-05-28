@@ -202,7 +202,7 @@ def load_data(args):
         is_testdata=args.is_testdata,
         for_pipeline=True
     )
-    train_loader = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, shuffle = True, pin_memory = True, num_workers = 32)
+    train_loader = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, shuffle = True, pin_memory = False, num_workers = 0)
     
     return train_loader
 

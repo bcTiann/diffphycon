@@ -852,7 +852,8 @@ def load_data(args):
         is_testdata=args.is_testdata,
         only_vis_pressure=args.only_vis_pressure
     )
-    test_loader = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, shuffle = False, pin_memory = True, num_workers = 32)
+    # MPS-safe defaults: pin_memory=False (warns on MPS), num_workers=0 (avoid 32 subprocesses each consuming hundreds of MB on Mac)
+    test_loader = torch.utils.data.DataLoader(dataset, batch_size = args.batch_size, shuffle = False, pin_memory = False, num_workers = 0)
     print("number of batch in test_loader: ", len(test_loader))
     # pdb.se
     return test_loader

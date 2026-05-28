@@ -1258,7 +1258,8 @@ Energy:   12.3         ← 总能量 12.3
 | $J_{\text{actual}} \sim 0.5$ | 还差不少,但方向对 |
 | $J_{\text{actual}} > 1$ | 基本失败,模型生成的 $w$ 跟目标关系不大 |
 
-> 论文 Table 2 报告的 lite 版 $J_{\text{actual}} \approx 0.03-0.08$ 量级。
+> ⚠️ 修正 (2026-05-27,读了 PDF 原文):论文 **Table 1**(不是 Table 2,那是 jellyfish dataset outline)报告 1D Burgers 的 $J_{\text{actual}}$。DiffPhyCon **FO-PC = 0.00037**,**PO-PC = 0.00494**,**PO-FC = 0.01103**。0.03-0.08 那个量级是较弱的 baseline(SAC/BC 等),不是 DiffPhyCon。
+> metric `J_actual = ∫_Ω|u(T)−u_d|²dx`(对空间积分)≈ 我们 `burgers_metric` 的 `.mean(-1)`(∫dx over [0,1] 128 点 = mean),都是物理单位 → **可直接比**。我们小规模 FM (0.0071) 比论文 0.00037 差 ~19×,纯规模差距。
 
 ---
 
