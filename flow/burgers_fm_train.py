@@ -74,10 +74,23 @@ class GaussianConditionalProbabilityPath:
 
 class BurgersVectorField(nn.Module):
     """Wraps Unet2D. Injects boundary c into x's u-channel rows 0 / T_IDX
-    before the Unet (inpainting-style conditioning)."""
-    def __init__(self, dim=128, dim_mults=(1, 2, 4, 8)):
+    before the Unet (inpainting-style conditioning).
+
+    Architecture hyperparams below match paper Table 5 (FO-PC) exactly.
+    They are also Unet2D defaults, but we pass them explicitly so a future
+    default change in Unet2D doesn't silently break paper-faithfulness.
+    """
+    def __init__(self, dim=128, dim_mults=(1, 2, 4),
+                 resnet_block_groups=8,    # paper Table 5
+                 attn_dim_head=32,          # paper Table 5
+                 attn_heads=4):             # paper Table 5
         super().__init__()
-        self.unet = Unet2D(dim=dim, dim_mults=dim_mults, channels=2)
+        self.unet = Unet2D(
+            dim=dim, dim_mults=dim_mults, channels=2,
+            resnet_block_groups=resnet_block_groups,
+            attn_dim_head=attn_dim_head,
+            attn_heads=attn_heads,
+        )
 
     def forward(self, x, t, c):
         x_in = x.clone()
