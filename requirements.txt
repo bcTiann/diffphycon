@@ -1,0 +1,31 @@
+# DiffPhyCon — pip 一键安装(不含 torch,假设镜像/环境里已有)
+# 用法:  pip install -r requirements.txt
+#
+# 在 AutoDL PyTorch 镜像或装好 torch 的环境里直接跑;
+# 在完全新环境里,先 `pip install torch torchvision` 再跑这条。
+
+numpy<2
+scipy
+h5py
+pandas
+matplotlib
+tqdm
+
+# Burgers / jellyfish 模型 + dataset 依赖
+einops
+einops_exts
+rotary_embedding_torch
+ema_pytorch
+accelerate
+tensorboardX
+torch_geometric
+
+# utils.py(burgers_metric / ddpm_guidance_loss)依赖
+termcolor
+scikit-learn
+
+# notebook + 工具
+nbformat
+jupyterlab
+ipykernel
+gdown

@@ -31,6 +31,7 @@ import sys
 import numpy as np
 import torch
 import torch.nn as nn
+from ema_pytorch import EMA
 
 # repo root importable
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -137,15 +138,34 @@ class BurgersDataset:
 # ============================================================================
 
 class FlowTrainer:
-    """Vanilla CFM trainer. is_prior=True zeros the u-channel target/pred."""
-    def __init__(self, net, path, data, lr=1e-4, use_ot=False, is_prior=False):
+    """CFM trainer with paper-faithful additions (EMA, cosine LR, loss masking).
+
+    Paper refs:
+      - EMA: standard for DDPM Trainer (β=0.995 default).
+      - Cosine annealing: Table 5 (UNet training config for FO-PC).
+      - Loss masking: D.4 "u_0 and u_d ... outputs at corresponding locations
+        are excluded from the loss." We mask u-channel boundary rows (0, T_IDX).
+        For prior, we additionally mask the entire u-channel (it only learns p(w|c)).
+    """
+    def __init__(self, net, path, data, lr=1e-4, use_ot=False, is_prior=False,
+                 use_ema=True, ema_decay=0.995, lr_scheduler=None, num_steps=None,
+                 mask_boundary_loss=True):
         self.net = net
         self.path = path
         self.data = data
         self.opt = torch.optim.Adam(net.parameters(), lr=lr)
         self.use_ot = use_ot
         self.is_prior = is_prior
+        self.mask_boundary_loss = mask_boundary_loss
         self.loss_history = []
+        # EMA: slow-moving averaged weights; use these for eval, not raw net (paper-standard)
+        self.ema = EMA(net, beta=ema_decay, update_every=10) if use_ema else None
+        # Cosine LR annealing — needs total num_steps to know the schedule length (paper Table 5)
+        self.scheduler = None
+        if lr_scheduler == "cosine" and num_steps:
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.opt, T_max=num_steps
+            )
 
     def get_train_loss(self, batch_size):
         z, c = self.data.sample(batch_size)
@@ -155,45 +175,100 @@ class FlowTrainer:
         t = torch.rand(batch_size, 1, 1, 1, device=z.device)
         x_t = self.path.alpha(t) * z + self.path.beta(t) * eps
         u_target = self.path.target_velocity(x_t, z, t, eps)
-        # inpaint trick: clean boundary rows → zero target velocity there
-        u_target[:, 0, 0, :]     = 0
-        u_target[:, 0, T_IDX, :] = 0
-        if self.is_prior:
-            u_target[:, 0] = 0
         u_pred = self.net(x_t, t, c)
+
+        # Per-element squared error
+        sq = (u_pred - u_target) ** 2
+
+        # Build loss mask: 1 = include in loss, 0 = exclude (paper D.4)
+        mask = torch.ones_like(sq)
+        if self.mask_boundary_loss:
+            # u_0 (row 0) and u_T (row T_IDX) of u-channel are inpainted, NOT predicted
+            mask[:, 0, 0, :]     = 0
+            mask[:, 0, T_IDX, :] = 0
         if self.is_prior:
-            u_pred = u_pred.clone()
-            u_pred[:, 0] = 0
-        return ((u_pred - u_target) ** 2).mean()
+            # Prior learns only p(w | c) — exclude entire u-channel from loss
+            mask[:, 0] = 0
+
+        return (sq * mask).sum() / mask.sum().clamp(min=1)
 
     def train(self, num_steps, batch_size, print_every=500,
-              ckpt_every=0, save_path=None):
+              ckpt_every=0, save_path=None, start_step=0):
         from tqdm.auto import tqdm
         self.net.train()
-        pbar = tqdm(range(num_steps), desc="train", leave=True)
+        pbar = tqdm(range(start_step, num_steps), desc="train",
+                    initial=start_step, total=num_steps, leave=True)
         for step in pbar:
             self.opt.zero_grad()
             loss = self.get_train_loss(batch_size)
             loss.backward()
             self.opt.step()
+            # EMA: update slow-moving weights (paper-standard for DDPM)
+            if self.ema is not None:
+                self.ema.update()
+            # Cosine LR annealing: step every iteration
+            if self.scheduler is not None:
+                self.scheduler.step()
             self.loss_history.append(loss.item())
             if step % print_every == 0 or step == num_steps - 1:
                 w = min(print_every, len(self.loss_history))
                 avg = float(np.mean(self.loss_history[-w:]))
-                pbar.set_postfix({"loss": f"{loss.item():.5f}", f"avg{w}": f"{avg:.5f}"})
+                lr_now = self.opt.param_groups[0]['lr']
+                pbar.set_postfix({"loss": f"{loss.item():.5f}",
+                                  f"avg{w}": f"{avg:.5f}",
+                                  "lr": f"{lr_now:.2e}"})
             if ckpt_every and save_path and step > 0 and step % ckpt_every == 0:
-                _save(self.net, self.loss_history, save_path, step=step)
+                _save(self.net, self.loss_history, save_path, step=step,
+                      ema=self.ema, optimizer=self.opt, scheduler=self.scheduler)
         return self.loss_history
 
 
-def _save(net, loss_history, save_path, config=None, step=None):
+def _save(net, loss_history, save_path, config=None, step=None,
+          ema=None, optimizer=None, scheduler=None):
+    """Save full training state for resume + eval.
+
+    For RESUME (intermediate ckpt at step k):
+      state_dict + ema_state_dict + optimizer + scheduler + step + loss_history
+    For EVAL (final ckpt):
+      state_dict + ema_state_dict (paper-faithful eval uses EMA weights)
+    """
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
-    payload = {"state_dict": net.state_dict(), "loss_history": loss_history}
+    payload = {
+        "state_dict": net.state_dict(),
+        "loss_history": loss_history,
+        "step": step if step is not None else len(loss_history),
+    }
+    if ema is not None:
+        payload["ema_state_dict"] = ema.ema_model.state_dict()
+        payload["ema_full"] = ema.state_dict()                # for resume (includes ema step counter)
+    if optimizer is not None:
+        payload["optimizer"] = optimizer.state_dict()         # Adam momentum etc.
+    if scheduler is not None:
+        payload["scheduler"] = scheduler.state_dict()         # cosine progress
     if config is not None:
         payload["config"] = config
     path = save_path if step is None else save_path.replace(".pt", f"_step{step}.pt")
     torch.save(payload, path)
     return path
+
+
+def _find_latest_intermediate(save_path):
+    """Scan for intermediate ckpts matching save_path pattern; return path of latest by step."""
+    import glob
+    base = save_path.replace(".pt", "")
+    pattern = f"{base}_step*.pt"
+    matches = glob.glob(pattern)
+    if not matches:
+        return None, 0
+    # parse step number from each filename, pick max
+    def _step_of(p):
+        try:
+            return int(p.rsplit("_step", 1)[1].replace(".pt", ""))
+        except (ValueError, IndexError):
+            return -1
+    matches.sort(key=_step_of)
+    latest = matches[-1]
+    return latest, _step_of(latest)
 
 
 # ============================================================================
@@ -205,9 +280,9 @@ def main():
     p.add_argument("--variant", choices=["vanilla", "ot"], required=True)
     p.add_argument("--model", choices=["joint", "prior"], required=True)
     p.add_argument("--dim", type=int, default=128)
-    p.add_argument("--dim_mults", type=int, nargs="+", default=[1, 2, 4, 8])
-    p.add_argument("--num_steps", type=int, default=200000)
-    p.add_argument("--batch_size", type=int, default=16)
+    p.add_argument("--dim_mults", type=int, nargs="+", default=[1, 2, 4])
+    p.add_argument("--num_steps", type=int, default=190000)   # paper Table 5
+    p.add_argument("--batch_size", type=int, default=16)      # paper Table 5
     p.add_argument("--lr", type=float, default=1e-4)
     p.add_argument("--dataset", type=str, default="free_u_f_paper_fopc")
     p.add_argument("--device", type=str, default="cuda")
@@ -215,6 +290,16 @@ def main():
     p.add_argument("--ckpt_every", type=int, default=20000, help="0 to disable intermediate ckpts")
     p.add_argument("--print_every", type=int, default=500)
     p.add_argument("--seed", type=int, default=0)
+    # Paper-faithful additions (paper Table 5 + D.4)
+    p.add_argument("--ema_decay", type=float, default=0.995,
+                   help="EMA decay; paper-standard 0.995. Use 0 to disable.")
+    p.add_argument("--lr_scheduler", type=str, default="cosine",
+                   choices=["cosine", "none"],
+                   help="LR scheduler; paper uses 'cosine' annealing.")
+    p.add_argument("--no_mask_boundary", dest="mask_boundary_loss",
+                   action="store_false",
+                   help="Disable boundary loss masking (NOT paper-faithful).")
+    p.set_defaults(mask_boundary_loss=True)
     args = p.parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -237,12 +322,48 @@ def main():
     net = BurgersVectorField(dim=args.dim, dim_mults=tuple(args.dim_mults)).to(args.device)
     print(f"  net params: {sum(p.numel() for p in net.parameters()):,}")
 
-    trainer = FlowTrainer(net, path, ds, lr=args.lr, use_ot=use_ot, is_prior=is_prior)
+    trainer = FlowTrainer(
+        net, path, ds,
+        lr=args.lr, use_ot=use_ot, is_prior=is_prior,
+        use_ema=(args.ema_decay > 0),
+        ema_decay=args.ema_decay,
+        lr_scheduler=args.lr_scheduler if args.lr_scheduler != "none" else None,
+        num_steps=args.num_steps,
+        mask_boundary_loss=args.mask_boundary_loss,
+    )
+    print(f"  EMA: {'ON β=' + str(args.ema_decay) if args.ema_decay > 0 else 'OFF'} | "
+          f"LR scheduler: {args.lr_scheduler} | "
+          f"boundary loss mask: {args.mask_boundary_loss}")
+
+    # ---- Skip / resume logic ----
+    start_step = 0
+    if os.path.isfile(args.save_path):
+        print(f"  ✅ FINAL ckpt already exists at {args.save_path} — skipping.")
+        return
+    latest, latest_step = _find_latest_intermediate(args.save_path)
+    if latest is not None and latest_step > 0:
+        print(f"  🔄 RESUME from {latest} (step {latest_step}/{args.num_steps})")
+        ckpt = torch.load(latest, map_location=args.device, weights_only=False)
+        net.load_state_dict(ckpt["state_dict"])
+        if trainer.ema is not None and "ema_full" in ckpt:
+            trainer.ema.load_state_dict(ckpt["ema_full"])
+        if "optimizer" in ckpt:
+            trainer.opt.load_state_dict(ckpt["optimizer"])
+        if trainer.scheduler is not None and "scheduler" in ckpt:
+            trainer.scheduler.load_state_dict(ckpt["scheduler"])
+        trainer.loss_history = ckpt.get("loss_history", [])
+        start_step = latest_step
+        print(f"  ⚠️  RNG state not restored — minor non-determinism (see docstring).")
+    else:
+        print(f"  🆕 Fresh start from step 0.")
+
     trainer.train(args.num_steps, args.batch_size, print_every=args.print_every,
-                  ckpt_every=args.ckpt_every, save_path=args.save_path)
+                  ckpt_every=args.ckpt_every, save_path=args.save_path,
+                  start_step=start_step)
 
     config = vars(args)
-    final = _save(net, trainer.loss_history, args.save_path, config=config)
+    final = _save(net, trainer.loss_history, args.save_path, config=config,
+                  ema=trainer.ema, optimizer=trainer.opt, scheduler=trainer.scheduler)
     print(f"  💾 saved final: {final}")
 
 
