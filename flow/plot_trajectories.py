@@ -31,17 +31,20 @@ from flow.burgers_fm_train import (
 from flow.burgers_fm_eval_v2 import euler_sample, load_net
 
 
-def simulate_pde(w_pred_batch: np.ndarray, u0_batch: np.ndarray) -> np.ndarray:
-    """Run ground-truth Burgers solver on w to get u(T)."""
+def simulate_pde(w_pred: torch.Tensor, u0: torch.Tensor) -> torch.Tensor:
+    """Run ground-truth Burgers solver on w to get u(T).
+
+    Args:
+        w_pred: (b, Nt-1=10, Nx=128) — already post-processed (paper D.2.2)
+        u0: (b, Nx=128) — initial condition (un-rescaled)
+    Returns:
+        u(T): (b, Nx=128) — final state, last time step of simulation
+    """
     from dataset.apps.generate_burgers import burgers_numeric_solve_free
-    # Naive sample-by-sample; small enough (n_samples ≤ 10)
-    u_T_sim = []
-    for i in range(w_pred_batch.shape[0]):
-        sol = burgers_numeric_solve_free(
-            u0=u0_batch[i], f=w_pred_batch[i], nu=0.01, T=1.0, Nt_internal=10000,
-        )
-        u_T_sim.append(sol[-1])
-    return np.stack(u_T_sim, axis=0)
+    sol = burgers_numeric_solve_free(
+        u0=u0, f=w_pred, visc=0.01, T=1.0, dt=1e-4, num_t=10,
+    )  # returns (b, num_t=10, Nx)
+    return sol[:, -1, :]   # u at the final time
 
 
 def main():
@@ -93,45 +96,46 @@ def main():
                                  n_steps=args.n_steps, gamma=gamma,
                                  device=args.device)
             x_cpu = x.cpu() * RESCALER
-            u_pred = x_cpu[:, 0, :11, :].numpy()
-            w_pred = x_cpu[:, 1, :10, :].numpy()
-            # mask w in central 50% for PDE (paper D.2.2)
-            n_x = w_pred.shape[-1]
-            w_pred_masked = w_pred.copy()
-            w_pred_masked[:, :, n_x // 4 : 3 * n_x // 4] = 0.0
-            u0 = c_eval[:, 0].cpu().numpy() * RESCALER
-            uT_target = c_eval[:, 1].cpu().numpy() * RESCALER
+            u_pred_np = x_cpu[:, 0, :11, :].numpy()       # for plotting only
+            w_pred_torch = x_cpu[:, 1, :10, :].clone()    # torch, will mask in-place
+            # mask w in central 50% (paper D.2.2 post-processing) before PDE
+            n_x = w_pred_torch.shape[-1]
+            w_pred_torch[:, :, n_x // 4 : 3 * n_x // 4] = 0.0
+            w_pred_np = w_pred_torch.numpy()              # for plotting display
+            u0_torch = c_eval[:, 0].cpu() * RESCALER      # (b, 128)
+            uT_target_np = (c_eval[:, 1].cpu() * RESCALER).numpy()
 
             print(f"  simulating PDE for {variant} γ={gamma}...")
-            uT_sim = simulate_pde(w_pred_masked, u0)
+            uT_sim_np = simulate_pde(w_pred_torch, u0_torch).numpy()
 
             # Plot: n_samples rows × 4 cols
             n = args.n_samples
             fig, axs = plt.subplots(n, 4, figsize=(16, 3.0 * n))
             if n == 1:
                 axs = axs[np.newaxis, :]
-            vmax_w = max(np.abs(w_pred).max(), 1e-3)
+            u0_np = u0_torch.numpy()
+            vmax_w = max(np.abs(w_pred_np).max(), 1e-3)
             for i in range(n):
                 # u_pred
-                axs[i, 0].imshow(u_pred[i], cmap="RdBu_r", aspect="auto",
+                axs[i, 0].imshow(u_pred_np[i], cmap="RdBu_r", aspect="auto",
                                  vmin=-3, vmax=3)
                 axs[i, 0].set_title(f"sample {i}: pred u(t,x)" if i == 0 else "")
                 axs[i, 0].set_ylabel(f"#{i}\nt")
-                # w_pred
-                axs[i, 1].imshow(w_pred[i], cmap="RdBu_r", aspect="auto",
+                # w_pred (already masked in middle)
+                axs[i, 1].imshow(w_pred_np[i], cmap="RdBu_r", aspect="auto",
                                  vmin=-vmax_w, vmax=vmax_w)
                 axs[i, 1].set_title("pred w(t,x)" if i == 0 else "")
                 # sim u (only shows u(T))
-                axs[i, 2].plot(uT_target[i], "k-", label="target u_T*", lw=2)
-                axs[i, 2].plot(uT_sim[i], "b--", label="sim u(T)", lw=1.5)
-                axs[i, 2].plot(u0[i], color="grey", alpha=0.5, label="u_0", lw=0.8)
+                axs[i, 2].plot(uT_target_np[i], "k-", label="target u_T*", lw=2)
+                axs[i, 2].plot(uT_sim_np[i], "b--", label="sim u(T)", lw=1.5)
+                axs[i, 2].plot(u0_np[i], color="grey", alpha=0.5, label="u_0", lw=0.8)
                 axs[i, 2].set_title("terminal match" if i == 0 else "")
                 axs[i, 2].legend(fontsize=7, loc="upper right")
                 axs[i, 2].grid(alpha=0.3)
                 # J metric per sample
-                J_i = float(((uT_sim[i] - uT_target[i]) ** 2).mean())
+                J_i = float(((uT_sim_np[i] - uT_target_np[i]) ** 2).mean())
                 axs[i, 3].text(0.5, 0.5,
-                               f"J = {J_i:.5f}\nE = {(w_pred[i] ** 2).sum():.1f}",
+                               f"J = {J_i:.5f}\nE = {(w_pred_np[i] ** 2).sum():.1f}",
                                ha="center", va="center", transform=axs[i, 3].transAxes,
                                fontsize=12)
                 axs[i, 3].axis("off")

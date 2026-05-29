@@ -82,33 +82,28 @@ def euler_sample(joint, prior, c, n_steps: int, gamma: float,
 # J / E via PDE solver (matches our existing helper)
 # -----------------------------------------------------------------------------
 
-def compute_J_E(x_pred: torch.Tensor, c: torch.Tensor, rescaler: float = RESCALER):
-    """J_actual via ground-truth Burgers solver (paper D.4).
+def compute_J_E(x_pred: torch.Tensor, u_target_full: torch.Tensor,
+                rescaler: float = RESCALER):
+    """J_actual via ground-truth Burgers solver (paper D.4 + D.2.2).
 
-    FOPC: w is zeroed in central 50% of space before PDE simulation
-    (paper D.2.2 post-processing).
+    Args:
+        x_pred: (b, 2, 16, 128) model output (rescaled, pre-divided)
+        u_target_full: (b, 11, 128) clean u trajectory from dataset (rescaled)
+
+    burgers_metric handles `partial_control='front_rear_quarter'` masking
+    internally (zeros central 50% of f before PDE solve).
     """
     from utils import burgers_metric
-    b = x_pred.shape[0]
-    x = x_pred.detach().cpu() * rescaler
-    c_cpu = c.detach().cpu() * rescaler
-    # FOPC mask on w: zero out central 50%
-    w_pred = x[:, 1, :10, :].clone()
-    n_x = w_pred.shape[-1]
-    w_pred[:, :, n_x // 4 : 3 * n_x // 4] = 0.0
-    u0 = c_cpu[:, 0]
-    u_T_target = c_cpu[:, 1]
-    # burgers_metric expects (u, f) and (u_target). API may vary; adapt as needed.
-    Js, Es = [], []
-    for i in range(b):
-        J_i, E_i = burgers_metric(
-            u0=u0[i:i+1].numpy(),
-            f=w_pred[i:i+1].numpy(),
-            u_target=u_T_target[i:i+1].numpy(),
-        )
-        Js.append(float(J_i))
-        Es.append(float(E_i))
-    return np.array(Js), np.array(Es)
+    x = x_pred.detach().cpu() * rescaler                # un-normalize
+    w_pred = x[:, 1, :10, :]                            # (b, 10, 128)
+    u_t = (u_target_full.detach().cpu() * rescaler)     # (b, 11, 128)
+    J, E = burgers_metric(
+        u_target=u_t,
+        f=w_pred,
+        target='final_u',
+        partial_control='front_rear_quarter',
+    )
+    return J.numpy(), E.numpy()
 
 
 # -----------------------------------------------------------------------------
@@ -175,6 +170,7 @@ def main():
     print(f"loaded test set: {ds.N} samples; using first {args.n_test}")
     zs = ds.all_z[:args.n_test].to(args.device)
     c_eval = torch.stack([zs[:, 0, 0, :], zs[:, 0, T_IDX, :]], dim=1)
+    u_target_full = zs[:, 0, :11, :]   # (b, 11, 128) clean u for J_actual
 
     rows = []
     for variant in args.variants:
@@ -196,7 +192,7 @@ def main():
             x_pred = euler_sample(joint, prior, c_eval,
                                   n_steps=args.n_steps, gamma=gamma,
                                   device=args.device)
-            Js, Es = compute_J_E(x_pred, c_eval)
+            Js, Es = compute_J_E(x_pred, u_target_full)
             J_mean, J_std, E_mean = Js.mean(), Js.std(), Es.mean()
             print(f"  γ={gamma:.1f}: J={J_mean:.5f} ± {J_std:.5f}   E={E_mean:.1f}")
             rows.append({
