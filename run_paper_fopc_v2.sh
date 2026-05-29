@@ -32,6 +32,8 @@ mkdir -p $CKPT_DIR $RESULTS_DIR
 NUM_STEPS=${NUM_STEPS:-190000}    # paper Table 5
 BATCH=${BATCH:-16}                # paper Table 5
 STAGE=${STAGE:-all}
+SKIP_OT=${SKIP_OT:-0}             # set 1 to skip OT-CFM (vanilla only, paper-complete)
+SKIP_PRIOR=${SKIP_PRIOR:-0}       # set 1 to skip prior (γ=1 only, DiffPhyCon-lite)
 
 # Common training args for ALL 4 models
 COMMON_TRAIN_ARGS="\
@@ -63,26 +65,36 @@ if [ "$STAGE" = "train" ] || [ "$STAGE" = "all" ]; then
       --save_path $CKPT_DIR/vanilla_joint.pt \
       $COMMON_TRAIN_ARGS
 
-  echo "########## JOINT 2/2: OT-CFM ##########"
-  python flow/burgers_fm_train.py \
-      --variant ot --model joint \
-      --dim 128 --dim_mults 1 2 4 \
-      --save_path $CKPT_DIR/ot_joint.pt \
-      $COMMON_TRAIN_ARGS
+  if [ "$SKIP_OT" != "1" ]; then
+    echo "########## JOINT 2/2: OT-CFM ##########"
+    python flow/burgers_fm_train.py \
+        --variant ot --model joint \
+        --dim 128 --dim_mults 1 2 4 \
+        --save_path $CKPT_DIR/ot_joint.pt \
+        $COMMON_TRAIN_ARGS
+  else
+    echo "########## SKIPPED: OT joint (SKIP_OT=1) ##########"
+  fi
 
-  echo "########## PRIOR 1/2: vanilla (dim=32, mults=1,2,4,8) ##########"
-  python flow/burgers_fm_train.py \
-      --variant vanilla --model prior \
-      --dim 32 --dim_mults 1 2 4 8 \
-      --save_path $CKPT_DIR/vanilla_prior.pt \
-      $COMMON_TRAIN_ARGS
+  if [ "$SKIP_PRIOR" != "1" ]; then
+    echo "########## PRIOR 1/2: vanilla (dim=32, mults=1,2,4,8) ##########"
+    python flow/burgers_fm_train.py \
+        --variant vanilla --model prior \
+        --dim 32 --dim_mults 1 2 4 8 \
+        --save_path $CKPT_DIR/vanilla_prior.pt \
+        $COMMON_TRAIN_ARGS
 
-  echo "########## PRIOR 2/2: OT-CFM ##########"
-  python flow/burgers_fm_train.py \
-      --variant ot --model prior \
-      --dim 32 --dim_mults 1 2 4 8 \
-      --save_path $CKPT_DIR/ot_prior.pt \
-      $COMMON_TRAIN_ARGS
+    if [ "$SKIP_OT" != "1" ]; then
+      echo "########## PRIOR 2/2: OT-CFM ##########"
+      python flow/burgers_fm_train.py \
+          --variant ot --model prior \
+          --dim 32 --dim_mults 1 2 4 8 \
+          --save_path $CKPT_DIR/ot_prior.pt \
+          $COMMON_TRAIN_ARGS
+    fi
+  else
+    echo "########## SKIPPED: priors (SKIP_PRIOR=1) ##########"
+  fi
 fi
 
 # --------------------------------------------------------------- post-training: plots + eval
@@ -92,13 +104,18 @@ if [ "$STAGE" = "train" ] || [ "$STAGE" = "all" ] || [ "$STAGE" = "eval" ]; then
       --ckpt_dir $CKPT_DIR \
       --out $RESULTS_DIR/loss_curves.png
 
+  # Build --variants list dynamically based on SKIP_OT
+  EVAL_VARIANTS="vanilla"
+  if [ "$SKIP_OT" != "1" ]; then EVAL_VARIANTS="vanilla ot"; fi
+
   echo "########## EVAL: γ-sweep, 1000 sampling steps, N_TEST=50 ##########"
   python flow/burgers_fm_eval_v2.py \
       --ckpt_dir $CKPT_DIR \
       --dataset $DATASET \
       --out_dir $RESULTS_DIR \
       --n_test 50 --n_steps 1000 \
-      --gammas 0.0 0.3 0.5 0.7 1.0
+      --gammas 0.0 0.3 0.5 0.7 1.0 \
+      --variants $EVAL_VARIANTS
 
   echo "########## VIZ: 5 test trajectories (γ=0, γ=1) ##########"
   python flow/plot_trajectories.py \
@@ -106,7 +123,8 @@ if [ "$STAGE" = "train" ] || [ "$STAGE" = "all" ] || [ "$STAGE" = "eval" ]; then
       --dataset $DATASET \
       --out_dir $RESULTS_DIR \
       --n_samples 5 --n_steps 1000 \
-      --gammas 0.0 1.0
+      --gammas 0.0 1.0 \
+      --variants $EVAL_VARIANTS
 
   echo "########## COMPARE: ours vs paper Table 1 + Table 25 ##########"
   python flow/compare_to_paper.py \
