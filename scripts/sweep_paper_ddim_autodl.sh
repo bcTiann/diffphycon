@@ -1,18 +1,33 @@
 #!/bin/bash
-# sweep_paper_ddim_autodl.sh — sweep paper DDPM/DDIM on AutoDL A100.
-#
-# Requires: trained_models/burgers/FOPC/cos10000-model-170.pt already uploaded
-#           (scp from Mac if not).
+# sweep_paper_ddim_autodl.sh — sweep paper DDPM/DDIM on AutoDL.
 #
 # Tests J vs n_steps for paper DDIM, + paper DDPM at 1000 step (baseline).
 # Generates 4-panel plots at key step counts.
 #
-# Usage:
+# Usage (GPU mode, default):
 #   bash scripts/sweep_paper_ddim_autodl.sh
-
-set -e
+#
+# Usage (CPU mode — AutoDL no-card mode for quick smoke test):
+#   MODE=cpu bash scripts/sweep_paper_ddim_autodl.sh
+#   (CPU is SLOW: paper DDPM 1000 step ≈ 30 min/sample. Use N_SAMPLES=2 to smoke-test)
+#
+# Override sample count:
+#   N_SAMPLES=5 bash scripts/sweep_paper_ddim_autodl.sh
+#
+# Note: removed `set -e` and grep filter — full output streams to terminal AND log file.
 
 cd /root/autodl-tmp/diffphycon
+
+MODE=${MODE:-gpu}
+N_SAMPLES=${N_SAMPLES:-50}
+
+if [ "$MODE" = "cpu" ]; then
+    echo "🐢 CPU mode — slow! recommend N_SAMPLES=2 for smoke test"
+    export CUDA_VISIBLE_DEVICES=""
+else
+    echo "🚀 GPU mode (default)"
+fi
+echo "n_test_samples = $N_SAMPLES"
 
 # Verify paper ckpt is present
 PAPER_CKPT=trained_models/burgers/FOPC/cos10000-model-170.pt
@@ -43,7 +58,7 @@ COMMON_ARGS=(
     --set_unobserved_to_zero_during_sampling False
     --checkpoint_interval 1000
     --checkpoint 170
-    --n_test_samples 50
+    --n_test_samples $N_SAMPLES
 )
 
 echo ""
@@ -52,20 +67,20 @@ echo "########## STAGE 1: J sweep across n_steps ##########"
 # DDPM 1000 (paper baseline)
 echo ""
 echo "########## DDPM 1000 ##########"
-python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
+python -u inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
     --save_file $OUT/ddpm_1000.yaml \
-    --save_tag ddpm_1000 2>&1 | tee "$OUT/log_ddpm_1000.log" | grep -E "J_actual|Energy"
+    --save_tag ddpm_1000 2>&1 | tee "$OUT/log_ddpm_1000.log"
 
 # DDIM at various step counts
 for STEPS in 1 4 8 16 50 100 1000; do
     echo ""
     echo "########## DDIM ${STEPS} step ##########"
-    python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
+    python -u inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
         --using_ddim True \
         --ddim_sampling_steps $STEPS \
         --ddim_eta 0. \
         --save_file $OUT/ddim_${STEPS}.yaml \
-        --save_tag ddim_${STEPS} 2>&1 | tee "$OUT/log_ddim_${STEPS}.log" | grep -E "J_actual|Energy"
+        --save_tag ddim_${STEPS} 2>&1 | tee "$OUT/log_ddim_${STEPS}.log"
 done
 
 echo ""
@@ -79,7 +94,7 @@ for TAG_TITLE in "ddpm_1000:Paper DDPM 1000 step" \
     TITLE="${TAG_TITLE##*:}"
     NPZ=outputs/trajectories/inference_trajectories_${TAG}.npz
     if [ -f "$NPZ" ]; then
-        python flow/plot_paper_trajectories.py \
+        python -u flow/plot_paper_trajectories.py \
             --npz "$NPZ" \
             --out_png "$PLOT_OUT/${TAG}.png" \
             --title "$TITLE" \
