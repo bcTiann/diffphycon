@@ -1344,9 +1344,11 @@ def ddpm_guidance_loss(
 
 # Loading dataset and model
 
-def load_burgers_dataset(root_path='data/free_u_f_1e5_front_rear_quarter'):
+def load_burgers_dataset(root_path='data/free_u_f_paper_fopc'):
     # NOTE: this dataset is used only to instantiate the Trainer class (DataLoader placeholder),
     # not used for actual sampling — so any valid Burgers dataset path works.
+    # Default changed from 'free_u_f_1e5_front_rear_quarter' to 'free_u_f_paper_fopc'
+    # so that paper inference works on machines that only have the paper-scale dataset.
     dataset = Burgers1D(
         dataset="burgers",
         input_steps=1,
