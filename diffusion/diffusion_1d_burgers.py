@@ -430,12 +430,14 @@ class GaussianDiffusion(nn.Module):
             # guidance
             if self.guidance_u0:
                 # === DIAGNOSTIC: print guidance magnitudes at key timesteps ===
+                # Skip if nablaJ returns int 0 (wfs=0, no guidance active).
                 _t_int = t[0].item()
                 if _t_int in {999, 800, 500, 200, 50, 10, 0}:
                     _grad = nablaJ(x_start)
-                    _sched = nablaJ_scheduler(_t_int)
-                    _eff = _grad * _sched
-                    print(f"[guide] t={_t_int:4d} | sched={_sched:.5f}  ||nablaJ||={_grad.norm().item():.4f}  ||eff||={_eff.norm().item():.4f}  ||pred_noise||={pred_noise.norm().item():.4f}")
+                    if hasattr(_grad, 'norm'):                       # tensor only; skip when guidance off
+                        _sched = nablaJ_scheduler(_t_int)
+                        _eff = _grad * _sched
+                        print(f"[guide] t={_t_int:4d} | sched={_sched:.5f}  ||nablaJ||={_grad.norm().item():.4f}  ||eff||={_eff.norm().item():.4f}  ||pred_noise||={pred_noise.norm().item():.4f}")
                 # === END DIAGNOSTIC ===
                 pred_noise = may_proj_guidance(pred_noise, nablaJ(x_start) * nablaJ_scheduler(t[0].item()))
                 x_start = self.predict_start_from_noise(x, t, pred_noise)

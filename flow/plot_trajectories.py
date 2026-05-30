@@ -104,6 +104,13 @@ def main():
             w_pred_np = w_pred_torch.numpy()              # for plotting display
             u0_torch = c_eval[:, 0].cpu() * RESCALER      # (b, 128)
             uT_target_np = (c_eval[:, 1].cpu() * RESCALER).numpy()
+            # Overwrite boundary rows of u_pred display with conditioning (paper-style inpaint).
+            # These positions are excluded from training loss → model output is free-drifting
+            # noise. Visualization should show the conditioning that the network actually
+            # received as input, not the model's unconstrained output. PDE solver / J use the
+            # real u_0 from data regardless, so this is purely cosmetic.
+            u_pred_np[:, 0, :]      = u0_torch.numpy()              # u_0
+            u_pred_np[:, T_IDX, :]  = uT_target_np                  # u_T
 
             print(f"  simulating PDE for {variant} γ={gamma}...")
             uT_sim_np = simulate_pde(w_pred_torch, u0_torch).numpy()

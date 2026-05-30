@@ -25,7 +25,7 @@ mkdir -p $OUT
 # Common args for all runs
 COMMON_ARGS=(
     --exp_id FOPC
-    --dataset free_u_f_1e5_front_rear_quarter
+    --dataset free_u_f_paper_fopc   # full paper-scale data (10000 test, take first 50)
     --is_condition_u0 True
     --is_condition_uT True
     --J_scheduler cosine
@@ -37,14 +37,26 @@ COMMON_ARGS=(
     --set_unobserved_to_zero_during_sampling False
     --checkpoint_interval 1000
     --checkpoint 170
-    --n_test_samples 50
+    --n_test_samples 50   # paper D.1 = 50 test samples
 )
 
-echo "########## DDPM 1000 (baseline, paper default) ##########"
-python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
-    --save_file $OUT/ddpm_1000.yaml 2>&1 | tail -3
+SKIP_1000=${SKIP_1000:-0}   # set SKIP_1000=1 to skip the slow 1000-step runs (already done)
 
-for STEPS in 1000 100 50 8 1; do
+if [ "$SKIP_1000" != "1" ]; then
+    echo "########## DDPM 1000 (baseline, paper default) ##########"
+    python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
+        --save_file $OUT/ddpm_1000.yaml 2>&1 | tail -3
+
+    echo ""
+    echo "########## DDIM 1000 step ##########"
+    python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
+        --using_ddim True \
+        --ddim_sampling_steps 1000 \
+        --ddim_eta 0. \
+        --save_file $OUT/ddim_1000.yaml 2>&1 | tail -3
+fi
+
+for STEPS in 100 50 8 1; do
     echo ""
     echo "########## DDIM ${STEPS} step ##########"
     python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \

@@ -32,7 +32,7 @@ for STEPS in 1 4 16 64 256 1000; do
     mkdir -p $PERSTEP_OUT
     python flow/burgers_fm_eval_v2.py \
         --ckpt_dir /tmp/ckpts_180k \
-        --dataset eval_180k_local \
+        --dataset free_u_f_paper_fopc \
         --out_dir $PERSTEP_OUT \
         --n_test 50 \
         --n_steps $STEPS \
