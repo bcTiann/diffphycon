@@ -53,6 +53,21 @@ if [ ! -f "$PAPER_CKPT" ]; then
 fi
 echo "✅ paper ckpt found: $(ls -la $PAPER_CKPT)"
 
+# Verify dataset present (paper inference doesn't generate data)
+TEST_H5=data/free_u_f_paper_fopc/burgers_test.h5
+if [ ! -f "$TEST_H5" ]; then
+    echo ""
+    echo "❌ test dataset missing: $TEST_H5"
+    echo ""
+    echo "Possible causes:"
+    echo "  1. data dir got cleaned. Investigate: find /root -name 'burgers_test.h5' 2>/dev/null"
+    echo "  2. backup exists. Try: cp -r data/free_u_f_paper_fopc_50sample_backup data/free_u_f_paper_fopc"
+    echo "  3. need to regenerate. Run: bash scripts/regen_500_and_sweep_autodl.sh"
+    echo "     (in CPU mode it auto-shrinks to N_TRAIN=50 N_TEST=2)"
+    exit 1
+fi
+echo "✅ test dataset found: $(du -h $TEST_H5 | cut -f1)"
+
 OUT=/root/autodl-tmp/diffphycon/flow/results/paper_ddim_sweep
 mkdir -p $OUT outputs/trajectories
 PLOT_OUT=/root/autodl-tmp/diffphycon/flow/results/paper_ddim_plots
