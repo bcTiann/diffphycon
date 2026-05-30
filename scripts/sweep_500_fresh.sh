@@ -9,6 +9,10 @@
 # Usage (GPU mode, default — ~25 min on A100):
 #   bash scripts/sweep_500_fresh.sh
 #
+# Skip paper portion (paper already done, just rerun FM with prior + γ-sweep):
+#   SKIP_PAPER=1 bash scripts/sweep_500_fresh.sh
+#   (~5 min: only Step 5 FM sweep runs. Steps 1-4 skipped. Existing test h5 reused.)
+#
 # Force CPU smoke (auto-shrinks N_TEST to 2):
 #   MODE=cpu bash scripts/sweep_500_fresh.sh
 #
@@ -70,6 +74,17 @@ for f in "$PAPER_CKPT" "$FM_SRC" "$TRAIN_H5"; do
     fi
 done
 echo "✅ pre-flight OK: paper ckpt, FM ckpt, train h5 all present"
+
+if [ -n "$SKIP_PAPER" ]; then
+    echo ""
+    echo "########## SKIP_PAPER=1 — skipping Steps 1-4 (backup, regen, DDPM, DDIM) ##########"
+    echo "Will reuse existing test h5 + paper npz, jumping straight to Step 5 (FM γ-sweep)"
+    if [ ! -f "$TEST_H5" ]; then
+        echo "❌ SKIP_PAPER requires existing $TEST_H5 — abort"
+        exit 1
+    fi
+    echo "✓ existing test h5 found: $(du -h $TEST_H5 | cut -f1)"
+else
 
 # --- Step 1: backup ORIGINAL 50-sample test + paper npz (idempotent) ---
 echo ""
@@ -145,20 +160,33 @@ for S in $STEPS; do
         2>&1 | tee $OUT/log_ddim_${S}.log
 done
 
-# --- Step 5: FM sweep (same n_steps set) ---
+fi   # end of SKIP_PAPER guard (closes the else from Step 1)
+
+# --- Step 5: FM sweep (same n_steps set, with prior + γ-sweep) ---
 FM_TMP=/tmp/fm_step170k
 mkdir -p $FM_TMP
 ln -sf "$FM_SRC" $FM_TMP/vanilla_joint.pt
 
+# Link prior (paper Table 5 prior, same 170k step as joint for fair comparison)
+FM_PRIOR_SRC=/root/autodl-tmp/diffphycon/flow/checkpoints/paper_fopc_v2/vanilla_prior_step170000.pt
+if [ -f "$FM_PRIOR_SRC" ]; then
+    ln -sf "$FM_PRIOR_SRC" $FM_TMP/vanilla_prior.pt
+    echo "✓ FM prior linked: $FM_PRIOR_SRC"
+    GAMMAS="0.5 1.0 1.5 2.0 3.0"
+else
+    echo "⚠️  FM prior missing at $FM_PRIOR_SRC — falling back to γ=1.0 only"
+    GAMMAS="1.0"
+fi
+
 echo ""
-echo "########## Step 5: FM sweep [$STEPS] ##########"
+echo "########## Step 5: FM sweep [$STEPS] × γ-sweep [$GAMMAS] ##########"
 for S in $STEPS; do
     echo ""
-    echo "----- FM n=$S -----"
+    echo "----- FM n=$S (all γ) -----"
     python -u flow/burgers_fm_eval_v2.py \
         --ckpt_dir $FM_TMP --dataset free_u_f_paper_fopc \
         --out_dir $OUT/fm_n${S} \
-        --n_test $N_TEST --n_steps $S --gammas 1.0 --variants vanilla \
+        --n_test $N_TEST --n_steps $S --gammas $GAMMAS --variants vanilla \
         --device $FM_DEVICE 2>&1 | tee $OUT/log_fm_n${S}.log
 done
 
