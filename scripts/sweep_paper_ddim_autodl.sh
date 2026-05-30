@@ -54,7 +54,7 @@ echo ""
 echo "########## DDPM 1000 ##########"
 python inference/inference_1d_burgers.py "${COMMON_ARGS[@]}" \
     --save_file $OUT/ddpm_1000.yaml \
-    --save_tag ddpm_1000 2>&1 | tail -3
+    --save_tag ddpm_1000 2>&1 | tee "$OUT/log_ddpm_1000.log" | grep -E "J_actual|Energy"
 
 # DDIM at various step counts
 for STEPS in 1 4 8 16 50 100 1000; do
@@ -65,7 +65,7 @@ for STEPS in 1 4 8 16 50 100 1000; do
         --ddim_sampling_steps $STEPS \
         --ddim_eta 0. \
         --save_file $OUT/ddim_${STEPS}.yaml \
-        --save_tag ddim_${STEPS} 2>&1 | tail -3
+        --save_tag ddim_${STEPS} 2>&1 | tee "$OUT/log_ddim_${STEPS}.log" | grep -E "J_actual|Energy"
 done
 
 echo ""
@@ -90,9 +90,27 @@ for TAG_TITLE in "ddpm_1000:Paper DDPM 1000 step" \
 done
 
 echo ""
+echo "########## STAGE 3: build summary table ##########"
+SUMMARY=$OUT/summary.txt
+{
+    echo "Paper inference J + Energy table (auto-extracted from log files)"
+    echo "================================================================"
+    printf "%-15s | %-15s | %-15s\n" "tag" "J_actual" "Energy"
+    echo "----------------------------------------------------------------"
+    for LOG in $OUT/log_*.log; do
+        TAG=$(basename "$LOG" .log | sed 's/^log_//')
+        J=$(grep "J_actual" "$LOG" | tail -1 | awk '{print $2}')
+        E=$(grep "Energy" "$LOG" | tail -1 | awk '{print $2}')
+        printf "%-15s | %-15s | %-15s\n" "$TAG" "$J" "$E"
+    done
+} | tee $SUMMARY
+
+echo ""
 echo "########## ✅ ALL DONE ##########"
 echo ""
-echo "YAML results: $OUT/"
+echo "Log files (full output per run): $OUT/log_*.log"
+echo "Summary table:                   $SUMMARY"
+echo "YAML results dir:                $OUT/"
 ls -la $OUT/
 echo ""
 echo "4-panel plots: $PLOT_OUT/"
