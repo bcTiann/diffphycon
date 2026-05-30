@@ -186,16 +186,31 @@ def main():
         else:
             print(f"  ⚠️  no prior found → can only run γ=1.0")
         import time
+        # CUDA warmup: run once before timing so JIT/alloc overhead doesn't pollute first measurement.
+        # Discards result.
+        if args.device.startswith("cuda"):
+            _ = euler_sample(joint, prior, c_eval[:2], n_steps=max(args.n_steps, 4),
+                             gamma=args.gammas[0], device=args.device)
+            torch.cuda.synchronize()
+
         for gamma in args.gammas:
             if prior is None and abs(gamma - 1.0) > 1e-8:
                 print(f"  γ={gamma}: skip (no prior)"); continue
             torch.manual_seed(args.seed)
+            if args.device.startswith("cuda"):
+                torch.cuda.synchronize()
             t_start = time.time()
             x_pred = euler_sample(joint, prior, c_eval,
                                   n_steps=args.n_steps, gamma=gamma,
                                   device=args.device)
+            if args.device.startswith("cuda"):
+                torch.cuda.synchronize()
             t_sample = time.time() - t_start
             Js, Es = compute_J_E(x_pred, u_target_full)
+            # Save per-sample arrays so downstream can plot distributions / paired comparisons
+            tag = f"{variant}_g{gamma:.2f}_n{args.n_steps}"
+            np.save(os.path.join(args.out_dir, f"per_sample_J_{tag}.npy"), np.asarray(Js))
+            np.save(os.path.join(args.out_dir, f"per_sample_E_{tag}.npy"), np.asarray(Es))
             J_mean, J_std, E_mean = Js.mean(), Js.std(), Es.mean()
             print(f"  γ={gamma:.1f}: J={J_mean:.5f} ± {J_std:.5f}   E={E_mean:.1f}   "
                   f"sampling_time={t_sample:.3f}s  (per_sample={t_sample/x_pred.shape[0]:.4f}s)")

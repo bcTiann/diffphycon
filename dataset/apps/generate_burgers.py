@@ -470,19 +470,32 @@ def generate_data_burgers_equation(
         print(f'Number of samples: {num_samples_test + num_samples_train}, generating free u and f')
         assert varying_f, 'Only supports varying_f when every f is paired with a different u0'
 
+    skip_first = getattr(args, 'skip_first', 0)
+    if skip_first > 0:
+        assert num_samples_train == 0, \
+            '--skip_first requires --train_samples 0 (train h5 is left untouched)'
+        print(f'⚙️  skip_first mode: drawing {skip_first} ICs to advance RNG, '
+              f'then generating {num_samples_test} fresh test samples '
+              f'at RNG positions [{skip_first}, {skip_first + num_samples_test - 1}]')
+
     # torch.random.manual_seed(2)
     sol = {}
     for key in pde:
         # Initial condition and time dependent force term
         if not uniform:
-            u0, f = make_data_varying_f(
-                Nu0=(num_samples_test + num_samples_train), 
-                Nf=(num_samples_test + num_samples_train), 
-                s=pde[key].grid_size[1], 
-                t=pde[key].grid_size[0] - 1, 
-                partial_control=partial_control, 
-                alpha=alpha, 
-            ) 
+            total_ics = skip_first + num_samples_test + num_samples_train
+            u0_full, f_full = make_data_varying_f(
+                Nu0=total_ics,
+                Nf=total_ics,
+                s=pde[key].grid_size[1],
+                t=pde[key].grid_size[0] - 1,
+                partial_control=partial_control,
+                alpha=alpha,
+            )
+            # Discard first `skip_first` (already drawn from RNG so subsequent samples are
+            # guaranteed never-seen if the original dataset had ≤ skip_first samples).
+            u0 = u0_full[skip_first:]
+            f = f_full[skip_first:]
             u0 = torch.FloatTensor(u0).to(device)
             f = torch.FloatTensor(f).to(device)
             pde[key].force = f.reshape(-1, pde[key].grid_size[0] - 1, pde[key].grid_size[1])
@@ -543,29 +556,52 @@ def generate_data_burgers_equation(
     # Save solutions
     if not os.path.exists("data/" + save_path):
         os.mkdir("data/" + save_path)
-    index_range = range(trajectory.shape[0])   
-    shuffled_indices = random.sample(index_range, len(index_range))  
-    save_name = "data/" + save_path + "_".join([str(pde[list(pde.keys())[0]]), 'train'])
-    h5f = h5py.File("".join([save_name, '.h5']), 'a')
-    dataset = h5f.create_group('train')
-    for key in pde:
-        h5f_u = dataset.create_dataset(key, data=sol[key][shuffled_indices[:num_samples_train]].cpu()\
-                                        .reshape(num_samples_train, *pde[key].grid_size), dtype=float)
-        h5f_f = dataset.create_dataset(key + f'_f', data=pde[key].force[shuffled_indices[:num_samples_train]].cpu()\
-                                        .reshape(num_samples_train, pde[key].grid_size[0] - 1, pde[key].grid_size[1]), dtype=float)
-    log_info('train', pde, dataset, h5f, num_samples_train, device)
-    h5f.close()
 
-    save_name = "data/" + save_path + "_".join([str(pde[list(pde.keys())[0]]), 'test'])
-    h5f = h5py.File("".join([save_name, '.h5']), 'a')
-    dataset = h5f.create_group('test')
-    for key in pde:
-        h5f_u = dataset.create_dataset(key, data=sol[key][shuffled_indices[-num_samples_test:]].cpu()\
-                                        .reshape(num_samples_test, *pde[key].grid_size), dtype=float)
-        h5f_f = dataset.create_dataset(key + f'_f', data=pde[key].force[shuffled_indices[-num_samples_test:]].cpu()\
-                                        .reshape(num_samples_test, pde[key].grid_size[0] - 1, pde[key].grid_size[1]), dtype=float)
-    log_info('test', pde, dataset, h5f, num_samples_test, device)
-    h5f.close()
+    if skip_first > 0:
+        # Extension mode: no shuffle, no train h5. All samples are "fresh" test.
+        test_indices = list(range(num_samples_test))
+        save_name = "data/" + save_path + "_".join([str(pde[list(pde.keys())[0]]), 'test'])
+        # Refuse to overwrite an existing test h5 — user must rename/back up first
+        # (prevents accidentally destroying the original held-out set).
+        if os.path.exists(save_name + '.h5'):
+            raise FileExistsError(
+                f"{save_name}.h5 already exists. Move/rename it before regenerating "
+                f"(e.g. mv burgers_test.h5 burgers_test_orig.h5.bak)."
+            )
+        h5f = h5py.File("".join([save_name, '.h5']), 'a')
+        dataset = h5f.create_group('test')
+        for key in pde:
+            h5f_u = dataset.create_dataset(key, data=sol[key][test_indices].cpu()\
+                                            .reshape(num_samples_test, *pde[key].grid_size), dtype=float)
+            h5f_f = dataset.create_dataset(key + f'_f', data=pde[key].force[test_indices].cpu()\
+                                            .reshape(num_samples_test, pde[key].grid_size[0] - 1, pde[key].grid_size[1]), dtype=float)
+        log_info('test', pde, dataset, h5f, num_samples_test, device)
+        h5f.close()
+        print(f"✅ wrote fresh test h5 ({num_samples_test} samples, skip_first={skip_first}); train h5 untouched.")
+    else:
+        index_range = range(trajectory.shape[0])
+        shuffled_indices = random.sample(index_range, len(index_range))
+        save_name = "data/" + save_path + "_".join([str(pde[list(pde.keys())[0]]), 'train'])
+        h5f = h5py.File("".join([save_name, '.h5']), 'a')
+        dataset = h5f.create_group('train')
+        for key in pde:
+            h5f_u = dataset.create_dataset(key, data=sol[key][shuffled_indices[:num_samples_train]].cpu()\
+                                            .reshape(num_samples_train, *pde[key].grid_size), dtype=float)
+            h5f_f = dataset.create_dataset(key + f'_f', data=pde[key].force[shuffled_indices[:num_samples_train]].cpu()\
+                                            .reshape(num_samples_train, pde[key].grid_size[0] - 1, pde[key].grid_size[1]), dtype=float)
+        log_info('train', pde, dataset, h5f, num_samples_train, device)
+        h5f.close()
+
+        save_name = "data/" + save_path + "_".join([str(pde[list(pde.keys())[0]]), 'test'])
+        h5f = h5py.File("".join([save_name, '.h5']), 'a')
+        dataset = h5f.create_group('test')
+        for key in pde:
+            h5f_u = dataset.create_dataset(key, data=sol[key][shuffled_indices[-num_samples_test:]].cpu()\
+                                            .reshape(num_samples_test, *pde[key].grid_size), dtype=float)
+            h5f_f = dataset.create_dataset(key + f'_f', data=pde[key].force[shuffled_indices[-num_samples_test:]].cpu()\
+                                            .reshape(num_samples_test, pde[key].grid_size[0] - 1, pde[key].grid_size[1]), dtype=float)
+        log_info('test', pde, dataset, h5f, num_samples_test, device)
+        h5f.close()
 
     sys.stdout.flush()
 
@@ -725,6 +761,13 @@ if __name__ == "__main__":
                 help='How much w is shifted from the original dataset')
     parser.add_argument('--save_path', type=str, default="",
                 help='Which path to save the result into')
+    parser.add_argument('--skip_first', type=int, default=0,
+                help='Discard the first N samples in the RNG sequence. '
+                     'Use to extend a dataset without overlap: e.g. if original '
+                     'dataset had 90050 samples (90000 train + 50 test), passing '
+                     '--skip_first 90050 generates new samples at RNG positions '
+                     '[90050, ...] that are guaranteed disjoint from the original. '
+                     'Requires --train_samples 0 (only test h5 is written; train h5 untouched).')
     args = parser.parse_args()
     # use same seed
     torch.manual_seed(0)
