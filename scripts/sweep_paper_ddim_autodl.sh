@@ -18,14 +18,28 @@
 
 cd /root/autodl-tmp/diffphycon
 
-MODE=${MODE:-gpu}
+# --- Auto-detect CUDA. Set MODE=cpu to force CPU. Set MODE=gpu to force GPU (and fail if no CUDA) ---
 N_SAMPLES=${N_SAMPLES:-50}
 
+if [ -z "$MODE" ]; then
+    if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then
+        MODE=gpu
+    else
+        MODE=cpu
+        echo "ℹ️  no CUDA detected, auto-switching to CPU mode"
+    fi
+fi
+
 if [ "$MODE" = "cpu" ]; then
-    echo "🐢 CPU mode — slow! recommend N_SAMPLES=2 for smoke test"
+    echo "🐢 CPU mode — slow! auto-reducing N_SAMPLES if > 5"
     export CUDA_VISIBLE_DEVICES=""
+    if [ $N_SAMPLES -gt 5 ]; then
+        echo "   N_SAMPLES was $N_SAMPLES → reducing to 2 for smoke test"
+        echo "   (override with: N_SAMPLES=<n> MODE=cpu bash ...)"
+        N_SAMPLES=2
+    fi
 else
-    echo "🚀 GPU mode (default)"
+    echo "🚀 GPU mode"
 fi
 echo "n_test_samples = $N_SAMPLES"
 
