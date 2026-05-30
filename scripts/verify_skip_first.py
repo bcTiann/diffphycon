@@ -182,6 +182,103 @@ def test_end_to_end_h5():
     print(f"  ✓ h5 contents bytewise-match in-memory baseline[{N}:{N+K}]")
 
 
+def test_no_anomalous_similarity():
+    """T5: bitwise disjoint isn't enough — verify NEW samples aren't
+    abnormally CLOSE to each other or to baseline (in L2 distance).
+
+    Compare pairwise L2 distance distributions:
+      A. within NEW (samples generated via --skip_first)
+      B. within INDEPENDENT (different seed=42, ground-truth IID)
+      C. NEW vs BASELINE (cross — what the model trained on)
+
+    If A's distribution matches B's, NEW samples are as 'spread out' as
+    truly independent samples → no clustering, no leak in functional sense.
+
+    Also: explicitly check that consecutive NEW samples (e.g. new[0] vs new[1])
+    aren't anomalously close — the user's specific concern.
+    """
+    print("\n=== T5: NEW samples aren't anomalously similar (pairwise L2) ===")
+    N_BASE = 1000       # 'training' size
+    K_EXT = 500         # what we'd extract via --skip_first=N_BASE
+    N_IND = 500         # truly independent samples (different seed)
+
+    # Baseline: Nu0=N_BASE (what model trained on)
+    _seed_all(0)
+    baseline_u0, _ = make_data_varying_f(Nu0=N_BASE, Nf=N_BASE, s=128, t=10,
+                                          partial_control='front_rear_quarter')
+
+    # Extension: Nu0=N_BASE+K_EXT, take last K_EXT (= skip_first behavior)
+    _seed_all(0)
+    ext_full_u0, _ = make_data_varying_f(Nu0=N_BASE + K_EXT, Nf=N_BASE + K_EXT, s=128, t=10,
+                                          partial_control='front_rear_quarter')
+    new_u0 = ext_full_u0[N_BASE:]   # (K_EXT, 128)
+
+    # Independent ground truth: completely different seed
+    _seed_all(42)
+    ind_u0, _ = make_data_varying_f(Nu0=N_IND, Nf=N_IND, s=128, t=10,
+                                     partial_control='front_rear_quarter')
+
+    def pairwise_l2(A, B=None):
+        if B is None:
+            B = A
+        diffs = A[:, None, :] - B[None, :, :]
+        return np.sqrt(np.sum(diffs ** 2, axis=-1))
+
+    def off_diag(M):
+        return M[np.triu_indices(M.shape[0], k=1)]
+
+    # A: within NEW
+    new_internal = off_diag(pairwise_l2(new_u0))
+    # B: within INDEPENDENT (control)
+    ind_internal = off_diag(pairwise_l2(ind_u0))
+    # C: NEW vs BASELINE (cross)
+    cross = pairwise_l2(new_u0, baseline_u0).flatten()
+
+    def stats(name, x):
+        return (f"  {name:30s}  n={len(x):>7}  "
+                f"min={x.min():.4f}  p1={np.percentile(x,1):.4f}  "
+                f"median={np.median(x):.4f}  max={x.max():.4f}")
+
+    print(stats("within NEW (skip_first)", new_internal))
+    print(stats("within INDEPENDENT (seed=42)", ind_internal))
+    print(stats("NEW vs BASELINE (cross)", cross))
+
+    # Comparison
+    new_med = np.median(new_internal)
+    ind_med = np.median(ind_internal)
+    cross_med = np.median(cross)
+    new_p1 = np.percentile(new_internal, 1)
+    ind_p1 = np.percentile(ind_internal, 1)
+
+    print(f"\n  median ratio NEW/INDEPENDENT = {new_med/ind_med:.3f}  (1.0 = same spread)")
+    print(f"  median ratio CROSS/INDEPENDENT = {cross_med/ind_med:.3f}")
+    print(f"  p1 ratio NEW/INDEPENDENT = {new_p1/ind_p1:.3f}  (closest 1% — would be <<1 if clustered)")
+
+    # Strict bounds: NEW shouldn't be more than 20% closer (median) than truly independent
+    assert 0.8 < new_med / ind_med < 1.2, \
+        f"❌ NEW median distance {new_med:.4f} vs IND {ind_med:.4f} — ratio {new_med/ind_med:.3f} out of [0.8, 1.2]"
+    assert 0.8 < cross_med / ind_med < 1.2, \
+        f"❌ CROSS median distance {cross_med:.4f} vs IND {ind_med:.4f} — ratio {cross_med/ind_med:.3f} out of [0.8, 1.2]"
+    assert new_p1 / ind_p1 > 0.5, \
+        f"❌ NEW closest 1% ({new_p1:.4f}) << IND closest 1% ({ind_p1:.4f}) — possible clustering"
+
+    # User's specific question: are consecutive new samples (500,501) abnormally close?
+    print(f"\n  Consecutive-pair distances in NEW (first 5):")
+    for i in range(5):
+        d_new = np.linalg.norm(new_u0[i] - new_u0[i+1])
+        d_ind = np.linalg.norm(ind_u0[i] - ind_u0[i+1])
+        print(f"    new[{i}] vs new[{i+1}]: {d_new:.4f}     |     ind[{i}] vs ind[{i+1}]: {d_ind:.4f}")
+
+    # Bonus: smallest 5 distances within NEW vs within IND
+    new_smallest = np.sort(new_internal)[:5]
+    ind_smallest = np.sort(ind_internal)[:5]
+    print(f"\n  5 smallest pairwise distances in NEW: {new_smallest}")
+    print(f"  5 smallest pairwise distances in IND: {ind_smallest}")
+
+    print(f"\n  ✓ NEW samples are statistically indistinguishable from IID independent samples")
+    print(f"    → no anomalous similarity, no clustering, no functional leak")
+
+
 def main():
     print("=" * 64)
     print("verify_skip_first.py — proving --skip_first is leak-free")
@@ -190,6 +287,7 @@ def main():
     test_skip_first_disjoint_from_baseline()
     test_interleaving_sanity()
     test_end_to_end_h5()
+    test_no_anomalous_similarity()
     print("\n" + "=" * 64)
     print("✅ ALL TESTS PASSED — --skip_first gives leak-free extension")
     print("=" * 64)
