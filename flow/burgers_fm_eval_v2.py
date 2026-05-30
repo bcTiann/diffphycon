@@ -185,27 +185,34 @@ def main():
             prior = load_net(prior_path, args.device, args.prior_dim, tuple(args.prior_mults))
         else:
             print(f"  ⚠️  no prior found → can only run γ=1.0")
+        import time
         for gamma in args.gammas:
             if prior is None and abs(gamma - 1.0) > 1e-8:
                 print(f"  γ={gamma}: skip (no prior)"); continue
             torch.manual_seed(args.seed)
+            t_start = time.time()
             x_pred = euler_sample(joint, prior, c_eval,
                                   n_steps=args.n_steps, gamma=gamma,
                                   device=args.device)
+            t_sample = time.time() - t_start
             Js, Es = compute_J_E(x_pred, u_target_full)
             J_mean, J_std, E_mean = Js.mean(), Js.std(), Es.mean()
-            print(f"  γ={gamma:.1f}: J={J_mean:.5f} ± {J_std:.5f}   E={E_mean:.1f}")
+            print(f"  γ={gamma:.1f}: J={J_mean:.5f} ± {J_std:.5f}   E={E_mean:.1f}   "
+                  f"sampling_time={t_sample:.3f}s  (per_sample={t_sample/x_pred.shape[0]:.4f}s)")
             rows.append({
                 "variant": variant, "gamma": gamma,
                 "J_mean": J_mean, "J_std": J_std, "E_mean": E_mean,
+                "sampling_time": t_sample,
+                "per_sample_time": t_sample / x_pred.shape[0],
             })
 
     # Write CSV
     out_csv = os.path.join(args.out_dir, "eval_table.csv")
     with open(out_csv, "w") as f:
-        f.write("variant,gamma,J_mean,J_std,E_mean\n")
+        f.write("variant,gamma,J_mean,J_std,E_mean,sampling_time,per_sample_time\n")
         for r in rows:
-            f.write(f"{r['variant']},{r['gamma']},{r['J_mean']:.6f},{r['J_std']:.6f},{r['E_mean']:.3f}\n")
+            f.write(f"{r['variant']},{r['gamma']},{r['J_mean']:.6f},{r['J_std']:.6f},"
+                    f"{r['E_mean']:.3f},{r['sampling_time']:.4f},{r['per_sample_time']:.5f}\n")
     print(f"\n💾 wrote {out_csv}")
 
 

@@ -287,11 +287,11 @@ def diffuse_2dconv(args, custom_metric, model_i, seed=0, ret_ls=False, **kwargs)
     ddpm = load_2dconv_model(model_i, args)
     
     # sample: actual scaled x and x_gt
-    # import time
-    # t1 = time.time()
+    import time
+    t1 = time.time()
     x = ddpm.sample(**kwargs) * RESCALER
-    # t2 = time.time()
-    # print(f'Sampling time: {t2 - t1} s')
+    t2 = time.time()
+    print(f'Sampling time: {t2 - t1:.4f} s')
     # BUG: with this implementation, when partially observed and using zero filling, this x_gt is intricically biased \
     # from the ground truth and thus cannot be used as a sign of how good DDPM learns the physical rules
     x_gt = burgers_numeric_solve_free(u0_from_x(x), f_from_x(x), visc=0.01, T=1.0, dt=1e-4, num_t=10)

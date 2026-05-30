@@ -93,15 +93,16 @@ echo ""
 echo "########## STAGE 3: build summary table ##########"
 SUMMARY=$OUT/summary.txt
 {
-    echo "Paper inference J + Energy table (auto-extracted from log files)"
-    echo "================================================================"
-    printf "%-15s | %-15s | %-15s\n" "tag" "J_actual" "Energy"
-    echo "----------------------------------------------------------------"
+    echo "Paper inference J + Energy + timing (auto-extracted from log files)"
+    echo "===================================================================="
+    printf "%-15s | %-12s | %-12s | %-12s\n" "tag" "J_actual" "Energy" "time(s)"
+    echo "--------------------------------------------------------------------"
     for LOG in $OUT/log_*.log; do
         TAG=$(basename "$LOG" .log | sed 's/^log_//')
         J=$(grep "J_actual" "$LOG" | tail -1 | awk '{print $2}')
         E=$(grep "Energy" "$LOG" | tail -1 | awk '{print $2}')
-        printf "%-15s | %-15s | %-15s\n" "$TAG" "$J" "$E"
+        T=$(grep "Sampling time" "$LOG" | tail -1 | awk '{print $3}')
+        printf "%-15s | %-12s | %-12s | %-12s\n" "$TAG" "$J" "$E" "$T"
     done
 } | tee $SUMMARY
 
