@@ -49,11 +49,11 @@ Full table:
 
 ![Box plot](figures/plot_box.png)
 
-### Per-sample paired: FM n=8 vs paper DDIM 100
+### Per-sample paired: FM n=8 vs Paper DDIM n=8 (same NFE)
 
-![FM vs DDIM paired](figures/plot_paired_FMn8_vs_DDIM100.png)
+![FM vs DDIM same NFE](figures/plot_paired_FM_vs_DDIM_n8.png)
 
-FM wins on 43/50 samples (86% paired win rate). Sorted by paper DDIM difficulty; green region = FM wins.
+Same NFE = same wallclock budget. FM wins on 419/500 samples (83.8% paired win rate). Mean J ratio 0.21× (FM 4.7× better). Sorted by Paper DDIM difficulty.
 
 ### γ-sweep: sigmoid_flip schedule (our initial, wrong choice)
 
@@ -66,18 +66,6 @@ Initial γ-sweep using a wrong-direction high-magnitude schedule. γ=1.0 looks o
 ![Jellyfish γ-sweep](figures/plot_jellyfish_J_vs_gamma.png)
 
 Under the paper's actual β schedule (sigmoid_beta_schedule with ξ = 1 - γ), γ has near-zero effect: 36/36 (γ, n_steps) cells within ±5% of γ=1.0. Quantitatively confirms paper L.1.
-
-### Schedule shape comparison
-
-![Schedule shapes](figures/plot_schedule_shapes.png)
-
-Our sigmoid_flip vs paper's jellyfish β. Opposite directions and very different magnitudes.
-
-### Sigmoid_flip vs jellyfish_beta at common γs
-
-![Compare schedules](figures/plot_compare_sigmoid_jellyfish.png)
-
-Same γ value, two schedule choices, very different J. Lesson: when reproducing paper claims about a hyperparameter, the schedule shape matters more than the hyperparameter value.
 
 ### U-shape in J(n_steps)
 
