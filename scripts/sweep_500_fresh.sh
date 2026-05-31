@@ -172,7 +172,7 @@ FM_PRIOR_SRC=/root/autodl-tmp/diffphycon/flow/checkpoints/paper_fopc_v2/vanilla_
 if [ -f "$FM_PRIOR_SRC" ]; then
     ln -sf "$FM_PRIOR_SRC" $FM_TMP/vanilla_prior.pt
     echo "✓ FM prior linked: $FM_PRIOR_SRC"
-    GAMMAS="0.5 1.0 1.5 2.0 3.0"
+    GAMMAS="0.1 0.3 0.5 0.7 1.0 1.5 2.0 3.0"
 else
     echo "⚠️  FM prior missing at $FM_PRIOR_SRC — falling back to γ=1.0 only"
     GAMMAS="1.0"
