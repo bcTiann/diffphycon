@@ -40,24 +40,69 @@ from flow.burgers_fm_train import (
 # -----------------------------------------------------------------------------
 
 def sigmoid_flip(t: torch.Tensor, slope: float = 10.0) -> torch.Tensor:
-    """Reverse-sigmoid schedule for prior reweighting (paper sigmoid_flip).
+    """Reverse-sigmoid schedule (our original).
 
     Returns ~1.0 near t=0 (pure noise) and ~0.0 near t=1 (clean).
-    Matches paper's β_{K-k} schedule where guidance is strong at early diffusion
-    steps and weak near the end.
+    Strong-at-noise, weak-at-clean. Slope=10.
     """
     return 1.0 - torch.sigmoid(slope * (t - 0.5))
 
 
+def _paper_sigmoid_beta(T: int = 1000, start=-3, end=3, tau=1):
+    """Paper jellyfish default β schedule (diffusion_2d_jellyfish.py:513-526, verbatim).
+
+    Returns fp32 1D tensor of length T with values rising from ~9e-5 (small,
+    "noise side" in DDPM convention) to ~0.02 (large, "clean side").
+    """
+    steps = T + 1
+    t = torch.linspace(0, T, steps, dtype=torch.float64) / T
+    v_start = torch.tensor(start / tau).sigmoid()
+    v_end = torch.tensor(end / tau).sigmoid()
+    alphas_cumprod = (-((t * (end - start) + start) / tau).sigmoid() + v_end) / (v_end - v_start)
+    alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
+    betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
+    return torch.clip(betas, 0, 0.999).float()
+
+
+def build_schedule(name: str = 'sigmoid_flip', T_paper: int = 1000, device: str = 'cuda'):
+    """Returns f(tau_scalar)->Python float, the prior-reweighting coefficient at FM time τ.
+
+    name='sigmoid_flip'  : our original (slope=10, strong-at-noise)
+    name='jellyfish_beta': paper jellyfish β schedule, indexed by FM τ.
+        IMPORTANT: paper's DDPM reverse loop goes t=T-1→0 and uses βs.flip(0)[t].
+        Our FM τ goes 0→1 (opposite direction). So we index β directly by τ index
+        (NO flip), giving sched(τ=0)≈β[0]≈9e-5 (noise, weak prior) and
+        sched(τ=1)≈β[T-1]≈0.02 (clean, strong prior) — same orientation as paper.
+    """
+    if name == 'sigmoid_flip':
+        def _sched(tau):
+            return float(1.0 - torch.sigmoid(torch.tensor(10.0 * (tau - 0.5))))
+        return _sched
+    if name == 'jellyfish_beta':
+        beta_arr = _paper_sigmoid_beta(T_paper).to(device)
+        T = T_paper
+        def _sched(tau):
+            idx = int(round(float(tau) * (T - 1)))
+            idx = max(0, min(T - 1, idx))
+            return float(beta_arr[idx])
+        return _sched
+    raise ValueError(f'unknown schedule {name!r}')
+
+
 @torch.no_grad()
 def euler_sample(joint, prior, c, n_steps: int, gamma: float,
+                 sched_fn=None,
                  shape=(2, 16, 128), device="cuda"):
     """Sample via Euler ODE with γ-prior-reweighting.
 
     For γ=1: v_eff = v_joint   (DiffPhyCon-lite)
-    For γ≠1: v_eff = v_joint + (γ-1) * sigmoid_flip(τ) * v_prior_w
+    For γ≠1: v_eff = v_joint + (γ-1) * sched_fn(τ) * v_prior_w
     where v_prior contributes only to w-channel (paper D.3.2).
+
+    `sched_fn` defaults to sigmoid_flip (our original) for backward compat.
     """
+    if sched_fn is None:
+        sched_fn = build_schedule('sigmoid_flip', device=device)
     b = c.shape[0]
     x = torch.randn(b, *shape, device=device)
     dt = 1.0 / n_steps
@@ -70,7 +115,7 @@ def euler_sample(joint, prior, c, n_steps: int, gamma: float,
             v_eff = v_joint
         else:
             v_prior = prior(x, t, c)                                 # outputs both channels; w only
-            sched = sigmoid_flip(torch.tensor(t_scalar, device=device))
+            sched = sched_fn(t_scalar)                                # Python float
             # Only mix into w-channel (channel 1); leave u-channel untouched
             v_eff = v_joint.clone()
             v_eff[:, 1] = v_joint[:, 1] + (gamma - 1.0) * sched * v_prior[:, 1]
@@ -155,6 +200,15 @@ def main():
     p.add_argument("--prior_mults", type=int, nargs="+", default=[1, 2, 4, 8])
     p.add_argument("--device", default="cuda")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--schedule", choices=['sigmoid_flip', 'jellyfish_beta'],
+                   default='sigmoid_flip',
+                   help="Prior reweighting schedule. "
+                        "'sigmoid_flip' = our original (slope=10, strong-at-noise). "
+                        "'jellyfish_beta' = paper jellyfish β-schedule "
+                        "(strong-at-clean, paper-faithful magnitude ~0.02 peak).")
+    p.add_argument("--paper_T", type=int, default=1000,
+                   help="Reference length for paper β array (FM τ → β idx). "
+                        "Independent of FM --n_steps.")
     args = p.parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -163,6 +217,13 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    # Build schedule + print sanity values so it's obvious in the log
+    sched_fn = build_schedule(args.schedule, T_paper=args.paper_T, device=args.device)
+    print(f"schedule={args.schedule}  T_paper={args.paper_T}")
+    print(f"  sched(0.000) = {sched_fn(0.0):.6f}")
+    print(f"  sched(0.500) = {sched_fn(0.5):.6f}")
+    print(f"  sched(0.999) = {sched_fn(0.999):.6f}")
 
     # Build test batch (first n_test samples — paper-faithful deterministic)
     ds_raw = load_burgers(args.dataset, split="test", device="cpu")
@@ -190,7 +251,7 @@ def main():
         # Discards result.
         if args.device.startswith("cuda"):
             _ = euler_sample(joint, prior, c_eval[:2], n_steps=max(args.n_steps, 4),
-                             gamma=args.gammas[0], device=args.device)
+                             gamma=args.gammas[0], sched_fn=sched_fn, device=args.device)
             torch.cuda.synchronize()
 
         for gamma in args.gammas:
@@ -202,7 +263,7 @@ def main():
             t_start = time.time()
             x_pred = euler_sample(joint, prior, c_eval,
                                   n_steps=args.n_steps, gamma=gamma,
-                                  device=args.device)
+                                  sched_fn=sched_fn, device=args.device)
             if args.device.startswith("cuda"):
                 torch.cuda.synchronize()
             t_sample = time.time() - t_start
