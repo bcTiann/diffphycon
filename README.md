@@ -1,6 +1,6 @@
 # DiffPhyCon — Reproduction with Flow Matching
 
-Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), using **Flow Matching (CondOT)** as the generative backbone instead of the paper's DDPM. Flow Matching implementation follows methods taught in **[MIT 6.S184 — Generative AI with Stochastic Differential Equations and Flow Matching](https://diffusion.csail.mit.edu/)** (link placeholder — update if course site moved).
+Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), using **Flow Matching (CondOT)** as the generative backbone instead of the paper's DDPM. Flow Matching implementation follows methods from **[MIT 6.S184 — Introduction to Flow Matching and Diffusion Models](https://diffusion.csail.mit.edu/2026/index.html)** (Peter Holderrieth & Ezra Erives, 2026).
 
 This is a fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Scope: **1D Burgers FOPC task only** (paper's Task 1). 2D Jellyfish and 2D Smoke not tested.
 
