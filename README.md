@@ -11,73 +11,11 @@ Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-Westlake
 
 ## Method
 
-Paper uses DDPM to jointly model `p(u, w | c)` where `u` = state trajectory, `w` = control sequence, `c = (u_0, u_T)`. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023), keeping everything else (architecture, conditioning via boundary inpainting, partial-control masking, loss masking on `u_0` and `u_T` rows) the same.
+Paper uses DDPM to jointly model `p(u, w | c)` where `u` = state trajectory, `w` = control sequence, `c = (u_0, u_T)`. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023, following the formulation in MIT 6.S184 lab notebooks). Architecture, conditioning via boundary inpainting, partial-control masking, and loss masking on `u_0` / `u_T` rows are kept unchanged from the paper.
 
-### CondOT path
+Sampler: standard Euler integration over `τ ∈ [0, 1]` with `N` steps. For the U-shape investigation we also test RK4, capped-τ Euler, and the Dense-Jump scheme (paper [2509.13574](https://arxiv.org/abs/2509.13574)) which replaces multi-step integration in the high-Lipschitz region near `τ=1` with a single terminal jump.
 
-```
-x_τ = α(τ)·z + β(τ)·ε,    α(τ) = τ,  β(τ) = 1 - τ
-```
-
-where `z = [u, w]` is the clean data, `ε ~ N(0, I)` is Gaussian noise, and `τ ∈ [0, 1]` is the FM time. `τ=0` corresponds to pure noise, `τ=1` to the data.
-
-### Target velocity
-
-Taking the time derivative of the path:
-
-```
-v_target(x_τ, τ) = α'(τ)·z + β'(τ)·ε
-                 = 1·z + (-1)·ε
-                 = z - ε
-```
-
-### Training objective (paper §D.4 + standard FM)
-
-```
-L = E_{τ ~ U[0,1)} E_{z,ε} [ ‖v_θ(x_τ, τ, c) - v_target‖² · mask ]
-```
-
-`mask` excludes the `u`-channel rows `0` (= `u_0`) and `T_IDX=10` (= `u_T`), because these rows are inpainted from `c` and not predicted by the model. Same masking pattern as the paper's DDPM training.
-
-### Inference (Euler sampler)
-
-```
-x_0 = noise
-for k = 0, 1, ..., N-1:
-    τ_k = k / N
-    v = v_θ(x_k, τ_k, c)
-    x_{k+1} = x_k + (1/N) · v
-return x_N
-```
-
-Each step is one Unet forward pass. Total NFE = N. Standard CondOT integration; no special tricks.
-
-### Velocity Lipschitz blow-up at τ→1
-
-Inverting the path equation to express `ε` in terms of `x_τ`:
-
-```
-ε = (x_τ - τ·z) / (1 - τ)
-∂ε/∂x = 1 / (1 - τ)
-∂v/∂x = -1 / (1 - τ)
-```
-
-The Lipschitz constant `L(τ) = 1 / (1 - τ)` diverges as `τ → 1`. This is well-known for CondOT FM and is the mechanism behind the U-shape in J(n_steps): small numerical errors in `x` are amplified by `L(τ)`, and large `N` accumulates more steps in the high-`L` region near `τ = 1`. The Dense-Jump paper (arxiv [2509.13574](https://arxiv.org/abs/2509.13574)) gives a formal treatment via Picard–Lindelöf.
-
-### Dense-jump fix
-
-Instead of `N` uniform Euler steps over `[0, 1]`, use `N-1` small steps over `[0, t_jump]` plus a single terminal jump:
-
-```
-dt_small = t_jump / (N - 1)
-for k = 0, 1, ..., N-2:
-    τ_k = k · dt_small
-    x = x + dt_small · v(x, τ_k, c)
-# single jump from t_jump → 1
-x = x + (1 - t_jump) · v(x, t_jump, c)
-```
-
-This avoids repeated steps in the high-Lipschitz region. We use `t_jump = 0.875` (matching our `n=8` baseline's max τ).
+Full derivations (CondOT path, target velocity, Lipschitz constant `L(τ)=1/(1-τ)`, Dense-Jump algorithm) are in [REPORT_fm_burgers_fopc.md](REPORT_fm_burgers_fopc.md) §4.
 
 ---
 
