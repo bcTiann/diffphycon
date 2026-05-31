@@ -92,34 +92,93 @@ def build_schedule(name: str = 'sigmoid_flip', T_paper: int = 1000, device: str 
 @torch.no_grad()
 def euler_sample(joint, prior, c, n_steps: int, gamma: float,
                  sched_fn=None,
+                 cap_tau: float = 1.0,
+                 reinpaint_boundary: bool = False,
+                 integrator: str = 'euler',
+                 dense_jump_tau: float = None,
                  shape=(2, 16, 128), device="cuda"):
-    """Sample via Euler ODE with γ-prior-reweighting.
+    """Sample via ODE with γ-prior-reweighting.
 
     For γ=1: v_eff = v_joint   (DiffPhyCon-lite)
     For γ≠1: v_eff = v_joint + (γ-1) * sched_fn(τ) * v_prior_w
     where v_prior contributes only to w-channel (paper D.3.2).
 
     `sched_fn` defaults to sigmoid_flip (our original) for backward compat.
+
+    Diagnostic flags (for U-shape investigation):
+      cap_tau            : integrate τ ∈ [0, cap_tau] instead of [0, 1].
+                           Default 1.0 = no change. Use 0.95 to skip τ≈1 OOD region.
+      reinpaint_boundary : after each step, reset x[:,0,0,:] and x[:,0,T_IDX,:] to c
+                           (fix boundary drift since Unet's velocity at those rows is
+                           loss-masked during training, so unconstrained at inference).
+                           Default False = current behavior. True = matches old
+                           burgers_fm_eval.py inpaint_overwrite pattern.
+      integrator         : 'euler' (1st-order, default) or 'rk4' (4th-order, 4×
+                           wallclock per step). RK4 tests if Euler truncation is
+                           the cause of n=1000 > n=8.
+      dense_jump_tau     : if set, use Dense-Jump scheme (paper 2509.13574):
+                           N-1 small Euler steps in [0, dense_jump_tau], then a
+                           SINGLE terminal jump of size (1-dense_jump_tau).
+                           Avoids non-Lipschitz region near τ=1. Default None = off.
+                           Recommended values: 0.5 (paper), 0.875 (our n=8 max).
     """
     if sched_fn is None:
         sched_fn = build_schedule('sigmoid_flip', device=device)
     b = c.shape[0]
     x = torch.randn(b, *shape, device=device)
-    dt = 1.0 / n_steps
-    for k in range(n_steps):
-        t_scalar = k * dt
-        t = torch.full((b, 1, 1, 1), t_scalar, device=device)
-        # Joint velocity
-        v_joint = joint(x, t, c)
+
+    def _get_v(x_curr, tau_scalar):
+        t_tensor = torch.full((b, 1, 1, 1), tau_scalar, device=device)
+        v_joint = joint(x_curr, t_tensor, c)
         if abs(gamma - 1.0) < 1e-8 or prior is None:
-            v_eff = v_joint
+            return v_joint
+        v_prior = prior(x_curr, t_tensor, c)
+        sched = sched_fn(tau_scalar)
+        v_eff = v_joint.clone()
+        v_eff[:, 1] = v_joint[:, 1] + (gamma - 1.0) * sched * v_prior[:, 1]
+        return v_eff
+
+    # Dense-Jump scheme (paper 2509.13574): N-1 small Euler steps in [0, t_jump],
+    # then single big jump of size (1 - t_jump) using v at t_jump.
+    # Skips the non-Lipschitz late-time region.
+    if dense_jump_tau is not None:
+        dt_small = float(dense_jump_tau) / max(1, n_steps - 1)
+        # Phase 1: N-1 small Euler steps in stable region
+        for k in range(n_steps - 1):
+            tau_k = k * dt_small
+            v = _get_v(x, tau_k)
+            x = x + dt_small * v
+            if reinpaint_boundary:
+                x[:, 0, 0, :]     = c[:, 0]
+                x[:, 0, T_IDX, :] = c[:, 1]
+        # Phase 2: single terminal jump from t_jump → 1.0
+        v_jump = _get_v(x, float(dense_jump_tau))
+        x = x + (1.0 - float(dense_jump_tau)) * v_jump
+        if reinpaint_boundary:
+            x[:, 0, 0, :]     = c[:, 0]
+            x[:, 0, T_IDX, :] = c[:, 1]
+        return x
+
+    # Standard (Euler or RK4) integration over [0, cap_tau]
+    dt = float(cap_tau) / n_steps
+    for k in range(n_steps):
+        tau_k = k * dt
+        if integrator == 'euler':
+            v = _get_v(x, tau_k)
+            x = x + dt * v
+        elif integrator == 'rk4':
+            k1 = _get_v(x,                tau_k)
+            k2 = _get_v(x + 0.5 * dt * k1, tau_k + 0.5 * dt)
+            k3 = _get_v(x + 0.5 * dt * k2, tau_k + 0.5 * dt)
+            k4 = _get_v(x + dt * k3,       tau_k + dt)
+            x = x + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
         else:
-            v_prior = prior(x, t, c)                                 # outputs both channels; w only
-            sched = sched_fn(t_scalar)                                # Python float
-            # Only mix into w-channel (channel 1); leave u-channel untouched
-            v_eff = v_joint.clone()
-            v_eff[:, 1] = v_joint[:, 1] + (gamma - 1.0) * sched * v_prior[:, 1]
-        x = x + dt * v_eff
+            raise ValueError(f'unknown integrator {integrator!r} (expect euler|rk4)')
+
+        if reinpaint_boundary:
+            # x is (b, 2, 16, 128); channel 0 is u, T_IDX=10 is u_T row
+            x[:, 0, 0, :]     = c[:, 0]
+            x[:, 0, T_IDX, :] = c[:, 1]
     return x
 
 
@@ -155,15 +214,13 @@ def compute_J_E(x_pred: torch.Tensor, u_target_full: torch.Tensor,
 # Load EMA weights from ckpt
 # -----------------------------------------------------------------------------
 
-def load_net(ckpt_path: str, device: str, dim: int, dim_mults: tuple):
+def load_net(ckpt_path: str, device: str, dim: int, dim_mults: tuple,
+             use_ema: bool = True):
     net = BurgersVectorField(dim=dim, dim_mults=dim_mults).to(device)
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    # Prefer EMA weights for paper-faithful eval
-    if "ema_state_dict" in ckpt:
-        # ema_pytorch's ema_model.state_dict() keys are slightly different;
-        # strip the "ema_model." or use raw if matches
+    # By default prefer EMA weights (paper-faithful). If use_ema=False, force raw.
+    if use_ema and "ema_state_dict" in ckpt:
         sd = ckpt["ema_state_dict"]
-        # Try direct load; fall back to stripping prefix
         try:
             net.load_state_dict(sd)
             tag = "EMA"
@@ -173,7 +230,7 @@ def load_net(ckpt_path: str, device: str, dim: int, dim_mults: tuple):
             tag = "EMA (prefix-stripped)"
     else:
         net.load_state_dict(ckpt["state_dict"])
-        tag = "raw"
+        tag = "raw (no EMA)" if not use_ema else "raw"
     net.eval()
     print(f"  loaded {os.path.basename(ckpt_path)}  [{tag}]")
     return net
@@ -209,6 +266,23 @@ def main():
     p.add_argument("--paper_T", type=int, default=1000,
                    help="Reference length for paper β array (FM τ → β idx). "
                         "Independent of FM --n_steps.")
+    # U-shape diagnostic flags
+    p.add_argument("--cap_tau", type=float, default=1.0,
+                   help="Cap integration τ ∈ [0, cap_tau]. Default 1.0 = no change. "
+                        "Use 0.95 / 0.85 etc. to skip τ near 1 (OOD test).")
+    p.add_argument("--reinpaint_boundary", action='store_true',
+                   help="Re-inject c into x boundary rows after each step "
+                        "(matches paper inpaint pattern). Default OFF.")
+    p.add_argument("--integrator", choices=['euler', 'rk4'], default='euler',
+                   help="ODE integrator. rk4 = 4th-order (4× wallclock).")
+    p.add_argument("--no_ema", action='store_true',
+                   help="Use raw state_dict instead of EMA weights. "
+                        "Tests whether EMA smoothing contributes to U-shape.")
+    p.add_argument("--dense_jump_tau", type=float, default=None,
+                   help="Dense-Jump (paper 2509.13574): N-1 small Euler steps in "
+                        "[0, dense_jump_tau], then 1 big jump to τ=1. "
+                        "Avoids non-Lipschitz region near τ=1. "
+                        "Recommended: 0.5 (paper) or 0.875 (our n=8 max τ).")
     args = p.parse_args()
 
     if args.device == "cuda" and not torch.cuda.is_available():
@@ -240,10 +314,12 @@ def main():
         if not os.path.isfile(joint_path):
             print(f"⚠️  missing {joint_path} — skipping {variant}"); continue
         print(f"\n=== {variant} ===")
-        joint = load_net(joint_path, args.device, args.joint_dim, tuple(args.joint_mults))
+        joint = load_net(joint_path, args.device, args.joint_dim, tuple(args.joint_mults),
+                         use_ema=not args.no_ema)
         prior = None
         if os.path.isfile(prior_path):
-            prior = load_net(prior_path, args.device, args.prior_dim, tuple(args.prior_mults))
+            prior = load_net(prior_path, args.device, args.prior_dim, tuple(args.prior_mults),
+                             use_ema=not args.no_ema)
         else:
             print(f"  ⚠️  no prior found → can only run γ=1.0")
         import time
@@ -251,7 +327,12 @@ def main():
         # Discards result.
         if args.device.startswith("cuda"):
             _ = euler_sample(joint, prior, c_eval[:2], n_steps=max(args.n_steps, 4),
-                             gamma=args.gammas[0], sched_fn=sched_fn, device=args.device)
+                             gamma=args.gammas[0], sched_fn=sched_fn,
+                             cap_tau=args.cap_tau,
+                             reinpaint_boundary=args.reinpaint_boundary,
+                             integrator=args.integrator,
+                             dense_jump_tau=args.dense_jump_tau,
+                             device=args.device)
             torch.cuda.synchronize()
 
         for gamma in args.gammas:
@@ -263,7 +344,12 @@ def main():
             t_start = time.time()
             x_pred = euler_sample(joint, prior, c_eval,
                                   n_steps=args.n_steps, gamma=gamma,
-                                  sched_fn=sched_fn, device=args.device)
+                                  sched_fn=sched_fn,
+                                  cap_tau=args.cap_tau,
+                                  reinpaint_boundary=args.reinpaint_boundary,
+                                  integrator=args.integrator,
+                                  dense_jump_tau=args.dense_jump_tau,
+                                  device=args.device)
             if args.device.startswith("cuda"):
                 torch.cuda.synchronize()
             t_sample = time.time() - t_start

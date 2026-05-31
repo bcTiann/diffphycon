@@ -194,3 +194,15 @@ events.out.*
 
 # If you really want to commit a small specific file inside an ignored dir,
 # use `git add -f path/to/file` to force-add it.
+flow/checkpoints/local/
+
+# Personal scratch notes (txt files at repo root) — not part of public artifact
+/autodl_commands.txt
+/autodl_fix_commands.txt
+/check_data.txt
+/diagnose_dense_jump.txt
+/diagnose_final.txt
+/download_results.txt
+/prior_cell.txt
+/rerun_after_fix.txt
+/rerun_dense_jump.txt

@@ -1,0 +1,48 @@
+# DiffPhyCon — conda 一键环境(含 torch)
+# 用法:
+#   conda env create -f environment.yml
+#   conda activate diffphycon
+#
+# 适合:本地从零搭环境 (M4 Pro / Linux GPU box / 任何 conda 环境)。
+# AutoDL 等已经有 torch 的环境,用 requirements.txt 即可。
+#
+# CUDA 版本说明:
+#   - 默认 cuda 12.1(适合 RTX 4090/4090D/3090/PRO 6000 等所有现代卡)
+#   - Mac (M4 Pro) 上 conda 装的 pytorch 会自动用 MPS,忽略 cuda 行
+#   - 需要其他 CUDA 版本改 `pytorch-cuda=12.4` 之类
+
+name: diffphycon
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.10
+  - pip
+  # core scientific
+  - numpy<2
+  - scipy
+  - h5py
+  - pandas
+  - matplotlib
+  - tqdm
+  # pytorch (conda 装,跟 cuda 配套)
+  - pytorch::pytorch>=2.1
+  - pytorch::torchvision
+  - pytorch::pytorch-cuda=12.1
+  # jupyter
+  - jupyterlab
+  - ipykernel
+  - nbformat
+  # pip-only deps (conda 没好版本的)
+  - pip:
+    - einops
+    - einops_exts
+    - rotary_embedding_torch
+    - ema_pytorch
+    - accelerate
+    - tensorboardX
+    - torch_geometric
+    - gdown

@@ -287,9 +287,14 @@ def diffuse_2dconv(args, custom_metric, model_i, seed=0, ret_ls=False, **kwargs)
     ddpm = load_2dconv_model(model_i, args)
     
     # sample: actual scaled x and x_gt
+    # Note: this includes ~0.5-1s of CUDA JIT/alloc on first call; use scripts/time_paper.py for clean per-step timing.
     import time
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
     t1 = time.time()
     x = ddpm.sample(**kwargs) * RESCALER
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
     t2 = time.time()
     print(f'Sampling time: {t2 - t1:.4f} s')
     # BUG: with this implementation, when partially observed and using zero filling, this x_gt is intricically biased \
