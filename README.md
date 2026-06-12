@@ -2,7 +2,7 @@
 
 Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), using **Flow Matching (CondOT)** as the generative backbone instead of the paper's DDPM. Flow Matching implementation follows methods from **[MIT 6.S184 — Introduction to Flow Matching and Diffusion Models](https://diffusion.csail.mit.edu/2026/index.html)** (Peter Holderrieth & Ezra Erives, 2026).
 
-Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Scope: **1D Burgers FOPC task only** (paper's Task 1). 2D Jellyfish and 2D Smoke not tested.
+Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Current scope: **1D Burgers FOPC** (paper's Task 1). 2D Jellyfish and 2D Smoke — ongoing.
 
 ---
 
@@ -149,12 +149,9 @@ python scripts/analyze_ushape_diag.py
 
 ---
 
-## Limitations
+## Status
 
-- 1D Burgers FOPC only. Paper's Task 2 (Jellyfish) and Task 3 (Smoke) not tested
-- Single seed for FM training (170k step on AutoDL, 180k locally)
-- `--dense_jump_tau 0.875` chosen empirically (matches n=8's max τ); no principled procedure to pick τ_jump per task
-- Paper DDPM at n_steps=1000 with batch_size=500 OOM'd in our setup; we report DDIM 1000 step (mathematically equivalent at η=0) as the upper-NFE baseline
+1D Burgers FOPC done. Paper's Task 2 (Jellyfish) and Task 3 (Smoke) — ongoing.
 
 ---
 
