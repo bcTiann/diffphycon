@@ -158,18 +158,9 @@ python scripts/analyze_ushape_diag.py
 
 ---
 
-## Citation (if you find this useful)
+## Citation
 
-```bibtex
-@misc{bctiann2026fmdiffphycon,
-  author = {bcTiann},
-  title  = {DiffPhyCon (Wei et al, NeurIPS 2024): reproduction with Flow Matching},
-  year   = {2026},
-  url    = {https://github.com/bcTiann/diffphycon}
-}
-```
-
-Plus the original paper:
+Original DiffPhyCon paper:
 
 ```bibtex
 @inproceedings{wei2024diffphycon,
@@ -180,7 +171,7 @@ Plus the original paper:
 }
 ```
 
-And the Dense-Jump paper that motivated the U-shape investigation:
+Dense-Jump paper (motivating the U-shape investigation):
 
 ```bibtex
 @misc{densejump2025,
