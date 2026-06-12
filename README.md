@@ -2,6 +2,8 @@
 
 Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), using **Flow Matching (CondOT)** as the generative backbone instead of the paper's DDPM. Flow Matching implementation follows methods from **[MIT 6.S184 — Introduction to Flow Matching and Diffusion Models](https://diffusion.csail.mit.edu/2026/index.html)** (Peter Holderrieth & Ezra Erives, 2026).
 
+Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Scope: **1D Burgers FOPC task only** (paper's Task 1). 2D Jellyfish and 2D Smoke not tested.
+
 ---
 
 ## Method
@@ -9,8 +11,6 @@ Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Sci
 Paper uses DDPM to jointly model `p(u, w | c)` where `u` = state trajectory, `w` = control sequence, `c = (u_0, u_T)`. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023, following the formulation in MIT 6.S184 lab notebooks). Architecture, conditioning via boundary inpainting, partial-control masking, and loss masking on `u_0` / `u_T` rows are kept unchanged from the paper.
 
 Sampler: standard Euler integration over `τ ∈ [0, 1]` with `N` steps. For the U-shape investigation we also test RK4, capped-τ Euler, and the Dense-Jump scheme (paper [2509.13574](https://arxiv.org/abs/2509.13574)) which replaces multi-step integration in the high-Lipschitz region near `τ=1` with a single terminal jump.
-
-Full derivations (CondOT path, target velocity, Lipschitz constant `L(τ)=1/(1-τ)`, Dense-Jump algorithm) are in [REPORT_fm_burgers_fopc.md](REPORT_fm_burgers_fopc.md) §4.
 
 ---
 
@@ -80,8 +80,6 @@ U-shape ratio J(n_max)/J(n_min): FM 1.74×, paper DDIM 1.05×.
 
 Local validation (180k checkpoint, 100 samples, MPS). `--dense_jump_tau 0.875` keeps J at the n=8 sweet spot across n=100/500/1000 (1.06× ratio vs baseline 1.75×). First validation of dense-jump beyond robotic policies.
 
-Math derivations, ablations, and a longer pitfalls log: [REPORT_fm_burgers_fopc.md](REPORT_fm_burgers_fopc.md).
-
 ---
 
 ## Files in this fork
@@ -103,9 +101,8 @@ scripts/analyze_500fresh_gamma.py    γ-sweep analysis
 scripts/analyze_jellyfish_vs_sigmoid.py  Schedule comparison
 scripts/analyze_ushape_diag.py       U-shape diagnostic analysis
 scripts/verify_skip_first.py         Data-leak-free test set verification (5 tests)
-pull_500sweep.sh                     AutoDL ↔ local rsync
+scripts/pull_500sweep.sh             AutoDL ↔ local rsync
 environment.yml                      Conda env
-REPORT_fm_burgers_fopc.md            Full report
 figures/                             Plots used in this README
 ```
 
