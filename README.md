@@ -12,6 +12,8 @@ Paper uses DDPM to jointly model `p(u, w | c)` where `u` = state trajectory, `w`
 
 Sampler: standard Euler integration over `τ ∈ [0, 1]` with `N` steps. For the U-shape investigation we also test RK4, capped-τ Euler, and the Dense-Jump scheme (paper [2509.13574](https://arxiv.org/abs/2509.13574)) which replaces multi-step integration in the high-Lipschitz region near `τ=1` with a single terminal jump.
 
+Derivation of the FM extension of prior reweighting (paper §3.2, Eq. 8–9): see [DERIVATION.md](DERIVATION.md).
+
 ---
 
 ## Results
