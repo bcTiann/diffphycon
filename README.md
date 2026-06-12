@@ -50,17 +50,11 @@ Full table:
 
 Same NFE = same wallclock budget. FM wins on 419/500 samples (83.8% paired win rate). Mean J ratio 0.21× (FM 4.7× better). Sorted by Paper DDIM difficulty.
 
-### γ-sweep: sigmoid_flip schedule (our initial, wrong choice)
-
-![γ-sweep sigmoid_flip](figures/plot_J_vs_gamma.png)
-
-Initial γ-sweep using a wrong-direction high-magnitude schedule. γ=1.0 looks optimal, deviations look catastrophic (γ=0.5 → 9× J degradation). This turned out to be a schedule artifact — see next plot.
-
-### γ-sweep: paper-faithful jellyfish β schedule (correct)
+### γ-sweep: jellyfish β schedule
 
 ![Jellyfish γ-sweep](figures/plot_jellyfish_J_vs_gamma.png)
 
-Under the paper's actual β schedule (sigmoid_beta_schedule with ξ = 1 - γ), γ has near-zero effect: 36/36 (γ, n_steps) cells within ±5% of γ=1.0. Quantitatively confirms paper L.1.
+Under the paper's β schedule (sigmoid_beta_schedule with ξ = 1 - γ), γ has near-zero effect: 36/36 (γ, n_steps) cells within ±5% of γ=1.0. Quantitatively confirms paper L.1.
 
 ### U-shape in J(n_steps)
 
