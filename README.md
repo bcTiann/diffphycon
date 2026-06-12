@@ -4,6 +4,8 @@ Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Sci
 
 Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Current scope: **1D Burgers FOPC** (paper's Task 1). 2D Jellyfish and 2D Smoke — ongoing.
 
+📐 **Derivation**: FM extension of prior reweighting (paper §3.2, Eq. 8–9) — [DERIVATION.md](DERIVATION.md)
+
 ---
 
 ## Method
@@ -11,8 +13,6 @@ Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-Westlake
 Paper uses DDPM to jointly model `p(u, w | c)` where `u` = state trajectory, `w` = control sequence, `c = (u_0, u_T)`. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023, following the formulation in MIT 6.S184 lab notebooks). Architecture, conditioning via boundary inpainting, partial-control masking, and loss masking on `u_0` / `u_T` rows are kept unchanged from the paper.
 
 Sampler: standard Euler integration over `τ ∈ [0, 1]` with `N` steps. For the U-shape investigation we also test RK4, capped-τ Euler, and the Dense-Jump scheme (paper [2509.13574](https://arxiv.org/abs/2509.13574)) which replaces multi-step integration in the high-Lipschitz region near `τ=1` with a single terminal jump.
-
-Derivation of the FM extension of prior reweighting (paper §3.2, Eq. 8–9): see [DERIVATION.md](DERIVATION.md).
 
 ---
 
