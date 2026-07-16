@@ -2,7 +2,7 @@
 
 Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), using **Flow Matching (CondOT)** as the generative backbone instead of the paper's DDPM. Flow Matching implementation follows methods from **[MIT 6.S184 — Introduction to Flow Matching and Diffusion Models](https://diffusion.csail.mit.edu/2026/index.html)** (Peter Holderrieth & Ezra Erives, 2026).
 
-Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Current scope: **1D Burgers FOPC** (paper's Task 1). 2D Jellyfish and 2D Smoke — ongoing.
+Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Current scope: **1D Burgers FOPC** (paper's Task 1) and a **2D Jellyfish Flow Matching implementation** (paper's Task 2). 2D Smoke is ongoing.
 
 📐 **Derivation**: FM extension of prior reweighting (paper §3.2, Eq. 8–9) — [DERIVATION.md](DERIVATION.md)
 
@@ -10,13 +10,40 @@ Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-Westlake
 
 ## Method
 
-Paper uses DDPM to jointly model `p(u, w | c)` where `u` = state trajectory, `w` = control sequence, `c = (u_0, u_T)`. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023, following the formulation in MIT 6.S184 lab notebooks). Architecture, conditioning via boundary inpainting, partial-control masking, and loss masking on `u_0` / `u_T` rows are kept unchanged from the paper.
+The paper uses DDPM to jointly model `p(u, w | c)`, where `u` is the state trajectory and `w` is the control sequence. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023, following the formulation in MIT 6.S184 lab notebooks). For Burgers, `c = (u_0, u_T)` and the paper's boundary inpainting and loss masks are retained. For Jellyfish, the model is conditioned on the frame-0 state and opening angle; the opening-angle endpoints are pinned to enforce the periodic control condition while the future state and interior controls are generated jointly.
 
 Sampler: standard Euler integration over `τ ∈ [0, 1]` with `N` steps. For the U-shape investigation we also test RK4, capped-τ Euler, and the Dense-Jump scheme (paper [2509.13574](https://arxiv.org/abs/2509.13574)) which replaces multi-step integration in the high-Lipschitz region near `τ=1` with a single terminal jump.
 
 ---
 
 ## Results
+
+### 2D Jellyfish: joint state/control generation
+
+The Jellyfish implementation trains a seven-channel CondOT model over the joint trajectory: three normalized state channels (`vx`, `vy`, `pressure`), one opening-angle channel, and three boundary channels. The comparison below uses the same initial condition for every method on the first ten held-out test simulations:
+
+- **GT**: held-out trajectory from the official dataset.
+- **DDPM plain**: official joint DDPM with objective guidance and prior reweighting disabled for the complete sampling trajectory (`lambda0=0`, `gamma=1`).
+- **DiffPhyCon-lite**: official DDPM checkpoint with the paper's lite guidance setting (`lambda0=0.3`, no prior reweighting).
+- **FM plain**: the 120k-step joint Flow Matching checkpoint, sampled with 100 Euler steps and both additions disabled (`lambda0=0`, `gamma=1`).
+
+#### Opening-angle trajectories
+
+![Jellyfish opening-angle comparison for the first ten test simulations](figures/jellyfish_theta_first10.png)
+
+#### Generated state fields
+
+The following plots compare normalized state fields at trajectory frame 10. Every channel uses one shared color scale across all ten samples and all four methods. The official 2D Jellyfish data has `vx`, `vy`, and `pressure`; it does not contain a `vz` channel.
+
+![Jellyfish normalized vx comparison at frame 10](figures/jellyfish_vx_first10_frame10.png)
+
+![Jellyfish normalized vy comparison at frame 10](figures/jellyfish_vy_first10_frame10.png)
+
+![Jellyfish normalized pressure comparison at frame 10](figures/jellyfish_pressure_first10_frame10.png)
+
+These figures compare the learned joint trajectory distributions. LilyPad replay and the paper's physical objective are evaluated separately.
+
+### 1D Burgers FOPC
 
 All evaluations on 500 held-out samples, leak-free test set (`--skip_first 90050`), paper-faithful `burgers_metric` (clears central 50% of `f` then re-solves PDE).
 
@@ -85,6 +112,7 @@ Local validation (180k checkpoint, 100 samples, MPS). `--dense_jump_tau 0.875` k
 ```
 flow/burgers_fm_train.py             FM training CLI (dim=128, EMA, cosine LR, paper Table 5 config)
 flow/burgers_fm_eval_v2.py           FM eval (γ-sweep, β schedule choice, dense-jump, RK4)
+flow/jellyfish_flowmatching.py       2D Jellyfish joint/prior FM training and guided sampling
 scripts/sweep_500_fresh.sh           Main paper baseline + FM sweep
 scripts/sweep_jellyfish_schedule.sh  γ-sweep with paper-faithful jellyfish β
 scripts/sweep_ushape_diag.sh         U-shape diagnostic (4 hypothesis tests, 60 cells)
@@ -147,7 +175,7 @@ python scripts/analyze_ushape_diag.py
 
 ## Status
 
-1D Burgers FOPC done. Paper's Task 2 (Jellyfish) and Task 3 (Smoke) — ongoing.
+1D Burgers FOPC done. The 2D Jellyfish joint/prior Flow Matching implementation and baseline trajectory comparison are included; LilyPad objective calibration is ongoing. Paper's Task 3 (Smoke) is ongoing.
 
 ---
 
