@@ -31,6 +31,16 @@ The Jellyfish implementation trains a seven-channel CondOT model over the joint 
 
 ![Jellyfish opening-angle comparison for the first ten test simulations](figures/jellyfish_theta_first10.png)
 
+#### Guided FM trajectory match
+
+Among the eight tested local refinement settings, the guided FM configuration
+`gamma=400, lambda=400` gives the closest aggregate match to the best-reported
+DDPM control trajectories on test simulations 0–9 (free-frame RMSE: **5.95°**).
+Both methods produce closely aligned deep, U-shaped opening-angle profiles on
+many of the held-out initial conditions.
+
+![Guided Jellyfish FM compared with DDPM best-reported on the first ten test simulations](figures/jellyfish_fm_gamma400_lambda400_vs_ddpm_best_first10.png)
+
 #### Generated state fields
 
 The following plots compare normalized state fields at trajectory frame 10. Every channel uses one shared color scale across all ten samples and all four methods. The official 2D Jellyfish data has `vx`, `vy`, and `pressure`; it does not contain a `vz` channel.
@@ -124,6 +134,7 @@ scripts/analyze_500fresh.py          Main results analysis
 scripts/analyze_500fresh_gamma.py    γ-sweep analysis
 scripts/analyze_jellyfish_vs_sigmoid.py  Schedule comparison
 scripts/analyze_ushape_diag.py       U-shape diagnostic analysis
+scripts/plot_jellyfish_fm_guided_readme.py  Guided FM vs DDPM best-reported README plot
 scripts/verify_skip_first.py         Data-leak-free test set verification (5 tests)
 scripts/pull_500sweep.sh             AutoDL ↔ local rsync
 environment.yml                      Conda env
