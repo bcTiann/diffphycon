@@ -10,9 +10,197 @@ Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-Westlake
 
 ## Method
 
-The paper uses DDPM to jointly model `p(u, w | c)`, where `u` is the state trajectory and `w` is the control sequence. We replace DDPM with **CondOT Flow Matching** (Lipman et al, ICLR 2023, following the formulation in MIT 6.S184 lab notebooks). For Burgers, `c = (u_0, u_T)` and the paper's boundary inpainting and loss masks are retained. For Jellyfish, the model is conditioned on the frame-0 state and opening angle; the opening-angle endpoints are pinned to enforce the periodic control condition while the future state and interior controls are generated jointly.
+### Conditional joint and control-prior models
 
-Sampler: standard Euler integration over `τ ∈ [0, 1]` with `N` steps. For the U-shape investigation we also test RK4, capped-τ Euler, and the Dense-Jump scheme (paper [2509.13574](https://arxiv.org/abs/2509.13574)) which replaces multi-step integration in the high-Lipschitz region near `τ=1` with a single terminal jump.
+We formulate physical control as conditional joint generation over the state
+trajectory $u$ and control sequence $w$. Let
+
+$$
+x=(u,w),
+$$
+
+and let $c$ contain the known initial, terminal, or boundary conditions. We
+replace the paper's DDPM backbone with **Conditional Optimal Transport Flow
+Matching (CondOT FM)** and train two vector fields:
+
+$$
+v_\theta^{\mathrm{joint}}
+\quad\Longleftrightarrow\quad
+p(u,w\mid c),
+$$
+
+$$
+v_\phi^{\mathrm{prior}}
+\quad\Longleftrightarrow\quad
+p(w\mid c).
+$$
+
+The joint model generates the physical state and control trajectories together.
+The second model learns only the marginal distribution of valid control
+sequences. Both use the CondOT probability path
+
+$$
+x_\tau=\tau x_1+(1-\tau)\epsilon,
+\qquad
+\epsilon\sim\mathcal N(0,I),
+$$
+
+with conditional target velocity $x_1-\epsilon$.
+
+For Jellyfish, $c=(u_0,w_0)$ contains the frame-0 flow state and opening angle.
+The generated variable contains three state channels (`vx`, `vy`, and
+`pressure`) and one opening-angle channel. Three boundary channels are
+deterministically reconstructed from the current noisy opening angle and are
+provided as geometric features; they are not an additional random variable in
+$p(u,w\mid c)$. The known initial frame is inpainted throughout sampling, and
+the first and last opening angles are pinned to enforce the periodic control
+condition.
+
+### Prior reweighting from DiffPhyCon Equation 9
+
+DiffPhyCon Equation 9 rewrites the joint distribution by adjusting the
+influence of the control prior:
+
+$$
+p_\gamma(u,w\mid c)
+=
+\frac{
+p(w\mid c)^{\gamma-1}p(u,w\mid c)
+}{Z}.
+$$
+
+Taking its log gradient gives
+
+$$
+\nabla\log p_\gamma(u,w\mid c)
+=
+\nabla\log p(u,w\mid c)
++
+(\gamma-1)
+\begin{bmatrix}
+0\\
+\nabla_w\log p(w\mid c)
+\end{bmatrix}.
+$$
+
+The zero state block is important: the marginal model $p(w\mid c)$ reweights
+only the control component, while the joint model remains responsible for the
+state-control trajectory.
+
+### Objective guidance
+
+To favor trajectories with a low control objective, we additionally tilt the
+sampling distribution by $\exp[-\lambda J(u,w)]$. The complete target sampled
+by the guided Flow Matching model is therefore
+
+$$
+\boxed{
+\pi(u,w\mid c)
+\propto
+p(u,w\mid c)
+p(w\mid c)^{\gamma-1}
+\exp[-\lambda J(u,w)]
+}.
+$$
+
+Its score decomposes into the joint model, prior reweighting, and objective
+guidance:
+
+$$
+\boxed{
+\nabla\log\pi
+=
+\nabla\log p(u,w\mid c)
++
+(\gamma-1)
+\begin{bmatrix}
+0\\
+\nabla_w\log p(w\mid c)
+\end{bmatrix}
+-
+\lambda\nabla J(u,w)
+}.
+$$
+
+For Jellyfish, the differentiable objective uses the learned force surrogate
+and has the form
+
+$$
+J(u,w)=-\operatorname{speed}(u,w)+\zeta R(w)+d(w_T,w_0),
+$$
+
+where $R(w)$ penalizes control variation and $d(w_T,w_0)$ enforces periodicity.
+
+### Converting the reweighted score to a Flow Matching velocity
+
+For a Gaussian probability path, the score and velocity satisfy
+
+$$
+v_\tau=a_\tau\nabla\log p_\tau+b_\tau x_\tau.
+$$
+
+For the CondOT path used here,
+
+$$
+a_\tau=\frac{1-\tau}{\tau},
+\qquad
+b_\tau=\frac{1}{\tau}.
+$$
+
+Applying the same identity to the marginal control model gives
+
+$$
+\nabla_w\log p_\tau(w\mid c)
+=
+\frac{1}{a_\tau}
+\left[v_\phi^{\mathrm{prior}}-b_\tau w_\tau\right].
+$$
+
+Substituting this expression into the guided score produces the combined Flow
+Matching vector field
+
+$$
+\boxed{
+v_\tau^{\mathrm{guided}}
+=
+v_\theta^{\mathrm{joint}}
++
+(\gamma_\tau-1)
+\begin{bmatrix}
+0\\
+v_\phi^{\mathrm{prior}}-b_\tau w_\tau
+\end{bmatrix}
+-
+a_\tau\lambda_\tau\nabla J(\hat u,\hat w)
+}.
+$$
+
+The coefficients $\gamma_\tau$ and $\lambda_\tau$ may be scheduled over
+generative time, and $(\hat u,\hat w)$ denotes the current clean trajectory
+estimate used to evaluate the objective. The prior correction is written into
+the free $w$ block only, whereas objective guidance can differentiate through
+both generated state and control variables. No retraining is required when
+changing either inference coefficient.
+
+### Sampling procedure
+
+Starting from conditional Gaussian noise, each solver step performs the
+following operations:
+
+1. Reapply the known condition and periodic opening-angle endpoints.
+2. Reconstruct the Jellyfish boundary from the current noisy control.
+3. Evaluate the joint vector field $v_\theta^{\mathrm{joint}}$.
+4. Evaluate $v_\phi^{\mathrm{prior}}$ and add the Equation 9 control-prior
+   correction.
+5. Estimate the clean joint trajectory, evaluate $J$, and differentiate it with
+   respect to the generated state and control.
+6. Combine the joint, reweighting, and guidance terms and advance the sample
+   with an Euler step.
+
+The default sampler integrates over $\tau\in[0,1]$ using $N$ Euler steps. For
+Burgers, $c=(u_0,u_T)$ and the paper's boundary inpainting and loss masks are
+retained. For the U-shape investigation we also test RK4, capped-$\tau$ Euler,
+and the Dense-Jump scheme ([arXiv:2509.13574](https://arxiv.org/abs/2509.13574)).
 
 ---
 
