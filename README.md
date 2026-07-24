@@ -15,35 +15,35 @@ Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-Westlake
 We formulate physical control as conditional joint generation over the state
 trajectory $u$ and control sequence $w$. Let
 
-$$
+```math
 x=(u,w),
-$$
+```
 
 and let $c$ contain the known initial, terminal, or boundary conditions. We
 replace the paper's DDPM backbone with **Conditional Optimal Transport Flow
 Matching (CondOT FM)** and train two vector fields:
 
-$$
+```math
 v_\theta^{\mathrm{joint}}
 \quad\Longleftrightarrow\quad
 p(u,w\mid c),
-$$
+```
 
-$$
+```math
 v_\phi^{\mathrm{prior}}
 \quad\Longleftrightarrow\quad
 p(w\mid c).
-$$
+```
 
 The joint model generates the physical state and control trajectories together.
 The second model learns only the marginal distribution of valid control
 sequences. Both use the CondOT probability path
 
-$$
+```math
 x_\tau=\tau x_1+(1-\tau)\epsilon,
 \qquad
 \epsilon\sim\mathcal N(0,I),
-$$
+```
 
 with conditional target velocity $x_1-\epsilon$.
 
@@ -61,17 +61,17 @@ condition.
 DiffPhyCon Equation 9 rewrites the joint distribution by adjusting the
 influence of the control prior:
 
-$$
+```math
 p_\gamma(u,w\mid c)
 =
 \frac{
 p(w\mid c)^{\gamma-1}p(u,w\mid c)
 }{Z}.
-$$
+```
 
 Taking its log gradient gives
 
-$$
+```math
 \nabla\log p_\gamma(u,w\mid c)
 =
 \nabla\log p(u,w\mid c)
@@ -81,7 +81,7 @@ $$
 0\\
 \nabla_w\log p(w\mid c)
 \end{bmatrix}.
-$$
+```
 
 The zero state block is important: the marginal model $p(w\mid c)$ reweights
 only the control component, while the joint model remains responsible for the
@@ -93,7 +93,7 @@ To favor trajectories with a low control objective, we additionally tilt the
 sampling distribution by $\exp[-\lambda J(u,w)]$. The complete target sampled
 by the guided Flow Matching model is therefore
 
-$$
+```math
 \boxed{
 \pi(u,w\mid c)
 \propto
@@ -101,12 +101,12 @@ p(u,w\mid c)
 p(w\mid c)^{\gamma-1}
 \exp[-\lambda J(u,w)]
 }.
-$$
+```
 
 Its score decomposes into the joint model, prior reweighting, and objective
 guidance:
 
-$$
+```math
 \boxed{
 \nabla\log\pi
 =
@@ -120,14 +120,14 @@ $$
 -
 \lambda\nabla J(u,w)
 }.
-$$
+```
 
 For Jellyfish, the differentiable objective uses the learned force surrogate
 and has the form
 
-$$
-J(u,w)=-\operatorname{speed}(u,w)+\zeta R(w)+d(w_T,w_0),
-$$
+```math
+J(u,w)=-\mathrm{speed}(u,w)+\zeta R(w)+d(w_T,w_0),
+```
 
 where $R(w)$ penalizes control variation and $d(w_T,w_0)$ enforces periodicity.
 
@@ -135,31 +135,31 @@ where $R(w)$ penalizes control variation and $d(w_T,w_0)$ enforces periodicity.
 
 For a Gaussian probability path, the score and velocity satisfy
 
-$$
+```math
 v_\tau=a_\tau\nabla\log p_\tau+b_\tau x_\tau.
-$$
+```
 
 For the CondOT path used here,
 
-$$
+```math
 a_\tau=\frac{1-\tau}{\tau},
 \qquad
 b_\tau=\frac{1}{\tau}.
-$$
+```
 
 Applying the same identity to the marginal control model gives
 
-$$
+```math
 \nabla_w\log p_\tau(w\mid c)
 =
 \frac{1}{a_\tau}
 \left[v_\phi^{\mathrm{prior}}-b_\tau w_\tau\right].
-$$
+```
 
 Substituting this expression into the guided score produces the combined Flow
 Matching vector field
 
-$$
+```math
 \boxed{
 v_\tau^{\mathrm{guided}}
 =
@@ -173,7 +173,7 @@ v_\phi^{\mathrm{prior}}-b_\tau w_\tau
 -
 a_\tau\lambda_\tau\nabla J(\hat u,\hat w)
 }.
-$$
+```
 
 The coefficients $\gamma_\tau$ and $\lambda_\tau$ may be scheduled over
 generative time, and $(\hat u,\hat w)$ denotes the current clean trajectory
