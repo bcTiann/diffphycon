@@ -268,6 +268,21 @@ The following plots compare normalized state fields at trajectory frame 10. Ever
 
 ![Jellyfish normalized pressure comparison at frame 10](figures/jellyfish_pressure_first10_frame10.png)
 
+#### Full generated-state trajectory
+
+The next plots fix test simulation 0 and follow every generated frame from 0
+through 19. Frames are split into four five-frame blocks for readability. Each
+block compares the held-out ground truth with plain FM and plain DDPM under the
+same initial condition; both learned samplers have objective guidance and prior
+reweighting disabled. A single color scale is shared across every frame and
+method within each channel.
+
+![Jellyfish normalized vx trajectory for test simulation 0](figures/jellyfish_vx_sim0_all_frames.png)
+
+![Jellyfish normalized vy trajectory for test simulation 0](figures/jellyfish_vy_sim0_all_frames.png)
+
+![Jellyfish normalized pressure trajectory for test simulation 0](figures/jellyfish_pressure_sim0_all_frames.png)
+
 These figures compare the learned joint trajectory distributions. LilyPad replay and the paper's physical objective are evaluated separately.
 
 ### 1D Burgers FOPC
