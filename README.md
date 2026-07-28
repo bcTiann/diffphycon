@@ -270,18 +270,18 @@ The following plots compare normalized state fields at trajectory frame 10. Ever
 
 #### Full generated-state trajectory
 
-The next plots fix test simulation 0 and follow every generated frame from 0
-through 19. Frames are split into four five-frame blocks for readability. Each
-block compares the held-out ground truth with plain FM and plain DDPM under the
-same initial condition; both learned samplers have objective guidance and prior
-reweighting disabled. A single color scale is shared across every frame and
-method within each channel.
+The animations below fix test simulation 0 and follow every generated frame
+from 0 through 19. Each frame compares the held-out ground truth with plain FM
+and plain DDPM under the same initial condition; both learned samplers have
+objective guidance and prior reweighting disabled. A single color scale is
+shared across every frame and method within each channel. Static 20-frame
+storyboards are also available by opening the corresponding animation.
 
-![Jellyfish normalized vx trajectory for test simulation 0](figures/jellyfish_vx_sim0_all_frames.png)
+[![Jellyfish normalized vx trajectory for test simulation 0](figures/jellyfish_vx_sim0_trajectory.gif)](figures/jellyfish_vx_sim0_all_frames.png)
 
-![Jellyfish normalized vy trajectory for test simulation 0](figures/jellyfish_vy_sim0_all_frames.png)
+[![Jellyfish normalized vy trajectory for test simulation 0](figures/jellyfish_vy_sim0_trajectory.gif)](figures/jellyfish_vy_sim0_all_frames.png)
 
-![Jellyfish normalized pressure trajectory for test simulation 0](figures/jellyfish_pressure_sim0_all_frames.png)
+[![Jellyfish normalized pressure trajectory for test simulation 0](figures/jellyfish_pressure_sim0_trajectory.gif)](figures/jellyfish_pressure_sim0_all_frames.png)
 
 These figures compare the learned joint trajectory distributions. LilyPad replay and the paper's physical objective are evaluated separately.
 

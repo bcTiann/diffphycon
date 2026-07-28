@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
 import numpy as np
 
 
@@ -43,7 +44,7 @@ def color_limits(values: np.ndarray, channel_name: str) -> tuple[float, float]:
     return -limit, limit
 
 
-def plot_channel(
+def plot_storyboard(
     methods: list[tuple[str, np.ndarray]],
     channel: int,
     channel_name: str,
@@ -51,70 +52,110 @@ def plot_channel(
     sim_id: int,
     output_path: Path,
 ) -> None:
-    frames_per_block = 5
-    blocks = 4
-    method_count = len(methods)
+    rows, columns = 4, 5
     all_values = np.concatenate(
         [state[:, channel].reshape(-1) for _, state in methods]
     )
     vmin, vmax = color_limits(all_values, channel_name)
 
     fig, axes = plt.subplots(
-        blocks * method_count,
-        frames_per_block,
-        figsize=(13.5, 15.0),
+        rows,
+        columns,
+        figsize=(15.0, 7.8),
         squeeze=False,
     )
     image = None
-    for block in range(blocks):
-        start = block * frames_per_block
-        for method_index, (method_name, state) in enumerate(methods):
-            row = block * method_count + method_index
-            for column, frame in enumerate(range(start, start + frames_per_block)):
-                ax = axes[row, column]
-                image = ax.imshow(
-                    state[frame, channel],
-                    cmap=cmap,
-                    vmin=vmin,
-                    vmax=vmax,
-                    interpolation="nearest",
-                )
-                ax.set_xticks([])
-                ax.set_yticks([])
-                if method_index == 0:
-                    ax.set_title(f"frame {frame}", fontsize=11)
-                if column == 0:
-                    ax.set_ylabel(
-                        method_name,
-                        rotation=0,
-                        ha="right",
-                        va="center",
-                        fontsize=10,
-                    )
-
-        if block < blocks - 1:
-            separator_row = (block + 1) * method_count - 1
-            for ax in axes[separator_row]:
-                ax.spines["bottom"].set_linewidth(2.0)
-                ax.spines["bottom"].set_color("#666666")
+    for frame, ax in enumerate(axes.flat):
+        composite = np.concatenate(
+            [state[frame, channel] for _, state in methods], axis=1
+        )
+        image = ax.imshow(
+            composite,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
+            aspect="equal",
+        )
+        ax.axvline(63.5, color="white", lw=1.4, alpha=0.9)
+        ax.axvline(127.5, color="white", lw=1.4, alpha=0.9)
+        ax.set_title(f"frame {frame}", fontsize=11, pad=3)
+        ax.set_xticks([])
+        ax.set_yticks([])
 
     fig.suptitle(
-        f"Normalized {channel_name} trajectory — test sim {sim_id}",
+        f"Normalized {channel_name} trajectory — test sim {sim_id}\n"
+        "Within each frame:  GT   |   FM plain   |   DDPM plain",
         fontsize=16,
-        y=0.995,
+        y=0.985,
     )
     assert image is not None
-    colorbar_axis = fig.add_axes((0.925, 0.08, 0.012, 0.84))
+    colorbar_axis = fig.add_axes((0.925, 0.11, 0.012, 0.76))
     fig.colorbar(image, cax=colorbar_axis, label="normalized value")
     fig.subplots_adjust(
-        left=0.13,
+        left=0.035,
         right=0.90,
-        top=0.965,
-        bottom=0.015,
-        hspace=0.22,
-        wspace=0.04,
+        top=0.88,
+        bottom=0.035,
+        hspace=0.33,
+        wspace=0.08,
     )
     fig.savefig(output_path, dpi=180, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+
+def plot_animation(
+    methods: list[tuple[str, np.ndarray]],
+    channel: int,
+    channel_name: str,
+    cmap: str,
+    sim_id: int,
+    output_path: Path,
+) -> None:
+    all_values = np.concatenate(
+        [state[:, channel].reshape(-1) for _, state in methods]
+    )
+    vmin, vmax = color_limits(all_values, channel_name)
+    fig, axes = plt.subplots(1, len(methods), figsize=(9.6, 3.35))
+    images = []
+    for ax, (method_name, state) in zip(axes, methods):
+        image = ax.imshow(
+            state[0, channel],
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
+        )
+        images.append(image)
+        ax.set_title(method_name, fontsize=13)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    frame_text = fig.text(0.5, 0.94, "frame 0", ha="center", va="center", fontsize=14)
+    colorbar_axis = fig.add_axes((0.925, 0.16, 0.015, 0.66))
+    fig.colorbar(images[0], cax=colorbar_axis, label="normalized value")
+    fig.suptitle(
+        f"Normalized {channel_name} trajectory — test sim {sim_id}",
+        fontsize=15,
+        y=1.06,
+    )
+    fig.subplots_adjust(left=0.025, right=0.90, top=0.84, bottom=0.04, wspace=0.08)
+
+    def update(frame: int):
+        for image, (_, state) in zip(images, methods):
+            image.set_data(state[frame, channel])
+        frame_text.set_text(f"frame {frame}")
+        return [*images, frame_text]
+
+    animation = FuncAnimation(
+        fig,
+        update,
+        frames=20,
+        interval=450,
+        blit=False,
+        repeat=True,
+    )
+    animation.save(output_path, writer=PillowWriter(fps=2.2), dpi=120)
     plt.close(fig)
 
 
@@ -141,18 +182,30 @@ def main() -> None:
     ]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for channel, channel_name, cmap in CHANNELS:
-        output_path = args.output_dir / (
+        storyboard_path = args.output_dir / (
             f"jellyfish_{channel_name}_sim{args.sim_id}_all_frames.png"
         )
-        plot_channel(
+        animation_path = args.output_dir / (
+            f"jellyfish_{channel_name}_sim{args.sim_id}_trajectory.gif"
+        )
+        plot_storyboard(
             methods,
             channel,
             channel_name,
             cmap,
             args.sim_id,
-            output_path,
+            storyboard_path,
         )
-        print(output_path)
+        plot_animation(
+            methods,
+            channel,
+            channel_name,
+            cmap,
+            args.sim_id,
+            animation_path,
+        )
+        print(storyboard_path)
+        print(animation_path)
 
 
 if __name__ == "__main__":
