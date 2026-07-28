@@ -8,6 +8,35 @@ Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-Westlake
 
 ---
 
+## Public data and checkpoints
+
+The complete Jellyfish resources used by this project are publicly available
+on Hugging Face:
+
+- **[Jellyfish dataset](https://huggingface.co/datasets/bcTiann/diffphycon-jellyfish-dataset)**:
+  the official 30,000-simulation training split, 200-simulation test split,
+  normalization metadata, boundaries, controls, forces, and fluid states,
+  packaged as checksum-verified tar shards.
+- **[Jellyfish checkpoints](https://huggingface.co/bcTiann/diffphycon-jellyfish-checkpoints)**:
+  the released DiffPhyCon DDPM, control-prior, force-surrogate, and boundary
+  updater weights, together with the complete saved Flow Matching joint
+  checkpoint series (10k--160k) and control-prior series (10k--70k).
+
+Download them with the Hugging Face CLI:
+
+```bash
+hf download bcTiann/diffphycon-jellyfish-dataset \
+  --repo-type dataset --local-dir data/jellyfish_hf
+
+hf download bcTiann/diffphycon-jellyfish-checkpoints \
+  --local-dir checkpoints/jellyfish_hf
+```
+
+The dataset and checkpoint cards document the directory layout, provenance,
+license status, and SHA256 integrity manifests.
+
+---
+
 ## Method
 
 ### Conditional joint and control-prior models
