@@ -1,6 +1,6 @@
-# Prior Reweighting in Flow Matching
+# Score-to-Velocity Adaptation of Prior Reweighting
 
-Derivation of the reweighted target velocity for the FM extension of DiffPhyCon's prior-reweighted sampling (paper §3.2, Eq. 8–9).
+Algebraic score-to-velocity conversion for an experimental FM adaptation of DiffPhyCon's prior-reweighted sampling (paper §3.2, Eq. 8–9). This note records the proposed conversion, not a proof that the resulting sampler produces the intended endpoint-reweighted distribution.
 
 ## Setup
 
@@ -26,7 +26,7 @@ $$
 
 where $a_\tau, b_\tau$ are path-dependent scalars.
 
-## Derivation
+## Score-to-velocity conversion
 
 **Step 1.** Take log and gradient of $\tilde p_\gamma$:
 
@@ -34,7 +34,7 @@ $$
 \nabla \log \tilde p_\gamma = \nabla \log p(u, w \mid c) + (\gamma - 1) \nabla \log p(w \mid c).
 $$
 
-**Step 2.** Apply Proposition 1 to $\tilde p_\gamma$:
+**Step 2 (proposed correction).** Use the score–velocity identity to motivate an additive velocity correction:
 
 $$
 \tilde u_\tau^{\text{rw}} = u_\tau^{\text{target}} + a_\tau (\gamma - 1) \nabla_{(u, w)} \log p(w \mid c).
@@ -58,7 +58,7 @@ $$
 \boxed{ \tilde u_\tau^{\text{rw}} = u_\tau^{\text{target}} + (\gamma - 1) \bigl[ u_\tau^{\text{prior}} - b_\tau [0, w] \bigr] }
 $$
 
-This is the mathematically exact reweighted target velocity.
+This expression is the proposed prior correction obtained by converting the score term to velocity form. It is used as a sampling heuristic; this calculation does not establish exact sampling of the endpoint-reweighted distribution.
 
 **Step 5 (empirical schedule).** Strong reweighting near $\tau \to 0$ (high noise) destabilises sampling. In practice, multiply $(\gamma - 1)$ by a time schedule $\tilde\eta(\tau)$:
 
