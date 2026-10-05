@@ -1,10 +1,19 @@
-# DiffPhyCon — Reproduction with Flow Matching
+# DiffPhyCon with Flow Matching
 
-Reproduction of [DiffPhyCon (Wei et al, NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), using **Flow Matching (CondOT)** as the generative backbone instead of the paper's DDPM. Flow Matching implementation follows methods from **[MIT 6.S184 — Introduction to Flow Matching and Diffusion Models](https://diffusion.csail.mit.edu/2026/index.html)** (Peter Holderrieth & Ezra Erives, 2026).
+A personal research project adapting joint state–control generation to Conditional OT Flow Matching for physical control tasks.
 
-Fork of [AI4Science-WestlakeU/diffphycon](https://github.com/AI4Science-WestlakeU/diffphycon). Current scope: **1D Burgers FOPC** (paper's Task 1) and a **2D Jellyfish Flow Matching implementation** (paper's Task 2). 2D Smoke is ongoing.
+Based on [DiffPhyCon (Wei et al., NeurIPS 2024)](https://github.com/AI4Science-WestlakeU/diffphycon), which uses diffusion/DDPM with objective guidance and control-prior reweighting. This fork replaces its generative backbone with **Conditional Optimal Transport Flow Matching (CondOT FM)**: learning a velocity field along a linear noise–data path and sampling by ODE integration, with experiments on sampling-step budgets and guided generation.
 
-📐 **Derivation**: FM extension of prior reweighting (paper §3.2, Eq. 8–9) — [DERIVATION.md](DERIVATION.md)
+## My Contributions
+
+- **FM backbone:** implemented CondOT velocity-field training and ODE sampling for joint state–control and marginal control-prior models on Burgers and Jellyfish.
+- **Conditioning:** adapted inpainting and loss masks; for Jellyfish, enforced periodic angle endpoints and reconstructed boundary features from noisy controls.
+- **Guidance/reweighting:** converted score-based terms to experimental velocity-field corrections, implemented objective-gradient guidance, and ran coefficient/schedule sweeps. [Score-to-velocity conversion note](DERIVATION.md).
+- **Evaluation:** [Burgers FOPC](#1d-burgers-fopc): 500-sample DDPM/DDIM comparisons across sampling-step budgets. [Jellyfish](#2d-jellyfish-joint-statecontrol-generation): joint state/control trajectory comparisons with upstream DDPM and DiffPhyCon-lite.
+
+**Scope and limits:** matching Jellyfish control profiles after parameter tuning does not establish correct prior reweighting or improved physical control. The observed guidance/reweighting behavior was not explained or pursued further.
+
+The framework, tasks, datasets, network architectures, and surrogate models come from DiffPhyCon. FM implementation follows [MIT 6.S184](https://diffusion.csail.mit.edu/2026/index.html) (Holderrieth & Erives, 2026). The [original README](README_ORIGINAL.md) and paper citation are retained.
 
 ---
 
@@ -118,9 +127,8 @@ state-control trajectory.
 
 ### Objective guidance
 
-To favor trajectories with a low control objective, we additionally tilt the
-sampling distribution by $\exp[-\lambda J(u,w)]$. The complete target sampled
-by the guided Flow Matching model is therefore
+To favor trajectories with a low control objective, the desired endpoint
+distribution additionally includes $\exp[-\lambda J(u,w)]$:
 
 ```math
 \boxed{
@@ -132,8 +140,8 @@ p(w\mid c)^{\gamma-1}
 }.
 ```
 
-Its score decomposes into the joint model, prior reweighting, and objective
-guidance:
+The score of this desired endpoint distribution decomposes into the joint
+model, prior reweighting, and objective guidance:
 
 ```math
 \boxed{
@@ -160,7 +168,14 @@ J(u,w)=-\mathrm{speed}(u,w)+\zeta R(w)+d(w_T,w_0),
 
 where $R(w)$ penalizes control variation and $d(w_T,w_0)$ enforces periodicity.
 
-### Converting the reweighted score to a Flow Matching velocity
+### Experimental score-to-velocity adaptation
+
+The Gaussian-path identity below motivates the implemented correction. It
+does not establish that applying endpoint reweighting to intermediate-time
+scores yields an ODE that samples the desired endpoint distribution. The
+reweighting and objective-guidance terms are treated here as experimental
+heuristics. [DERIVATION.md](DERIVATION.md) records the algebraic score-to-velocity
+conversion, without establishing exact sampling of the reweighted target.
 
 For a Gaussian probability path, the score and velocity satisfy
 
@@ -185,8 +200,8 @@ Applying the same identity to the marginal control model gives
 \left[v_\phi^{\mathrm{prior}}-b_\tau w_\tau\right].
 ```
 
-Substituting this expression into the guided score produces the combined Flow
-Matching vector field
+Motivated by this identity, the Jellyfish sampler implements the following
+experimental Flow Matching vector field
 
 ```math
 \boxed{
@@ -228,7 +243,9 @@ following operations:
 
 The default sampler integrates over $\tau\in[0,1]$ using $N$ Euler steps. For
 Burgers, $c=(u_0,u_T)$ and the paper's boundary inpainting and loss masks are
-retained. For the U-shape investigation we also test RK4, capped-$\tau$ Euler,
+retained. The Burgers evaluator uses a simpler schedule-weighted prior-velocity
+correction in the control channel; the combined formula above describes the
+Jellyfish sampler. For the U-shape investigation we also test RK4, capped-$\tau$ Euler,
 and the Dense-Jump scheme ([arXiv:2509.13574](https://arxiv.org/abs/2509.13574)).
 
 ---
@@ -237,7 +254,7 @@ and the Dense-Jump scheme ([arXiv:2509.13574](https://arxiv.org/abs/2509.13574))
 
 ### 2D Jellyfish: joint state/control generation
 
-The Jellyfish implementation trains a seven-channel CondOT model over the joint trajectory: three normalized state channels (`vx`, `vy`, `pressure`), one opening-angle channel, and three boundary channels. The comparison below uses the same initial condition for every method on the first ten held-out test simulations:
+The Jellyfish implementation transports four channels with CondOT FM: three normalized state channels (`vx`, `vy`, `pressure`) and one opening-angle channel. Three reconstructed boundary-feature channels give the network seven input channels; they are not independently generated variables. The comparison below uses the same initial condition for every method on the first ten held-out test simulations:
 
 - **GT**: held-out trajectory from the official dataset.
 - **DDPM plain**: official joint DDPM with objective guidance and prior reweighting disabled for the complete sampling trajectory (`lambda0=0`, `gamma=1`).
@@ -254,7 +271,9 @@ Among the eight tested local refinement settings, the guided FM configuration
 `gamma=400, lambda=400` gives the closest aggregate match to the best-reported
 DDPM control trajectories on test simulations 0–9 (free-frame RMSE: **5.95°**).
 Both methods produce closely aligned deep, U-shaped opening-angle profiles on
-many of the held-out initial conditions.
+many of the held-out initial conditions. This is a tuned trajectory comparison,
+not validation of the reweighting rule or evidence of improved physical control;
+the observed behavior was not given a verified causal explanation.
 
 ![Guided Jellyfish FM compared with DDPM best-reported on the first ten test simulations](figures/jellyfish_fm_gamma400_lambda400_vs_ddpm_best_first10.png)
 
@@ -319,19 +338,19 @@ Full table:
 
 ![FM vs DDIM same NFE](figures/plot_paired_FM_vs_DDIM_n8.png)
 
-Same NFE = same wallclock budget. FM wins on 419/500 samples (83.8% paired win rate). Mean J ratio 0.21× (FM 4.7× better). Sorted by Paper DDIM difficulty.
+At the same sampling-step count (8), the reported comparison has lower J for FM on 419/500 samples (83.8% paired win rate), with a mean J ratio of 0.21×. Equal step counts do not imply equal wallclock cost; measured times are listed above. Sorted by Paper DDIM difficulty.
 
 ### γ-sweep: jellyfish β schedule
 
 ![Jellyfish γ-sweep](figures/plot_jellyfish_J_vs_gamma.png)
 
-Under the paper's β schedule (sigmoid_beta_schedule with ξ = 1 - γ), γ has near-zero effect: 36/36 (γ, n_steps) cells within ±5% of γ=1.0. Quantitatively confirms paper L.1.
+In the Burgers sweep using the paper's Jellyfish β schedule (sigmoid_beta_schedule with ξ = 1 - γ), γ has near-zero effect: the reported 36/36 (γ, n_steps) cells are within ±5% of γ=1.0. This observation is specific to the tested implementation and settings.
 
 ### U-shape in J(n_steps)
 
 ![U-shape diagnostic](figures/plot_ushape_J_vs_nsteps.png)
 
-11 lines: baseline + 4 cap_τ + reinpaint + 4 cap_τ+reinpaint + RK4. Documents that 4 inference-side hypotheses (cap_τ, reinpaint, RK4, EMA) all fail to fix the U-shape. The root cause is model+integrator, not a bug.
+11 lines: baseline + 4 cap_τ + reinpaint + 4 cap_τ+reinpaint + RK4. Documents that 4 inference-side hypotheses (cap_τ, reinpaint, RK4, EMA) all fail to fix the U-shape. These ablations do not establish the root cause or rule out implementation issues.
 
 ### FM and paper DDIM both have a U-shape; FM's is sharper
 
@@ -343,7 +362,7 @@ U-shape ratio J(n_max)/J(n_min): FM 1.74×, paper DDIM 1.05×.
 
 ![Dense-jump fix](figures/plot_dense_jump_vs_baseline_local.png)
 
-Local validation (180k checkpoint, 100 samples, MPS). `--dense_jump_tau 0.875` keeps J at the n=8 sweet spot across n=100/500/1000 (1.06× ratio vs baseline 1.75×). First validation of dense-jump beyond robotic policies.
+Local validation (180k checkpoint, 100 samples, MPS). `--dense_jump_tau 0.875` keeps J at the n=8 sweet spot across n=100/500/1000 (1.06× ratio vs baseline 1.75×). This is a local experiment applying the cited Dense-Jump method to Burgers; broader generalization is not established.
 
 ---
 
@@ -379,7 +398,7 @@ figures/                             Plots used in this README
 dataset/apps/generate_burgers.py     Added --skip_first flag for leak-free test set
 ```
 
-Everything else under `inference/`, `diffusion/`, `model/`, `dataset/` is unchanged from upstream.
+The original framework, tasks, datasets, network architectures, and diffusion baselines are inherited from upstream; the FM-specific additions are listed above.
 
 ---
 
@@ -418,7 +437,7 @@ python scripts/analyze_ushape_diag.py
 
 ## Status
 
-1D Burgers FOPC done. The 2D Jellyfish joint/prior Flow Matching implementation and baseline trajectory comparison are included; LilyPad objective calibration is ongoing. Paper's Task 3 (Smoke) is ongoing.
+Documented results cover 1D Burgers FOPC and 2D Jellyfish joint/prior FM with baseline trajectory comparisons. Jellyfish guidance and prior reweighting remain exploratory: a reliable control-performance improvement and a verified explanation of the observed behavior were not established, and further investigation is not currently planned. Upstream Smoke code is retained, but no completed FM Smoke results are reported here.
 
 ---
 
